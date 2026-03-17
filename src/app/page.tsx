@@ -107,13 +107,13 @@ export default function StudentPage() {
       formData.append('file', file);
 
       setLoadingProgress(30);
-      setLoadingStatus('Извлечение текста через mammoth.js...');
+      setLoadingStatus('Извлечение текста...');
 
       // Пауза для обновления UI
       await new Promise(r => setTimeout(r, 100));
 
       setLoadingProgress(50);
-      setLoadingStatus('Анализ структуры через ChatGPT 5 mini...');
+      setLoadingStatus('Анализ работы...');
 
       const res = await fetch('/api/check', {
         method: 'POST',
@@ -175,6 +175,11 @@ export default function StudentPage() {
       <div className="min-h-screen bg-slate-50">
         <Header />
         <main className="max-w-3xl mx-auto px-6 py-8">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 mb-4 text-sm text-amber-800">
+            Несогласны с результатами анализа? Напишите нам{' '}
+            <a href="mailto:example@hse.ru" className="font-semibold underline">example@hse.ru</a>
+          </div>
+
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7">
             {/* Заголовок и бейдж */}
             <div className="flex justify-between items-start flex-wrap gap-4 mb-4">
@@ -412,8 +417,8 @@ export default function StudentPage() {
 // ============ HEADER ============
 function Header() {
   return (
-    <header className="bg-gradient-to-r from-slate-800 to-blue-700 text-white py-5 shadow-lg print:shadow-none">
-      <div className="max-w-3xl mx-auto px-6 flex justify-between items-center">
+    <header className="bg-gradient-to-r from-slate-800 to-blue-700 text-white shadow-lg print:shadow-none">
+      <div className="max-w-3xl mx-auto px-6 py-5 flex justify-between items-center">
         <div>
           <h1 className="text-xl font-bold">Проверка ВКР</h1>
           <p className="text-xs opacity-75 mt-0.5">Автоматическая проверка магистерских работ по чек-листу</p>
@@ -424,6 +429,12 @@ function Header() {
             Преподаватель
           </Link>
         </nav>
+      </div>
+      <div className="border-t border-white/10 print:hidden">
+        <div className="max-w-3xl mx-auto px-6 py-1.5 text-xs text-white/60">
+          Нашли ошибку? Сообщите разработчику:{' '}
+          <a href="mailto:example@hse.ru" className="underline hover:text-white/80">example@hse.ru</a>
+        </div>
       </div>
     </header>
   );

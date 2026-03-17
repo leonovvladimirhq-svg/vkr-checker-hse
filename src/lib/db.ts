@@ -126,6 +126,7 @@ export function insertAttempt(data: {
 }
 
 export function getAllStudentsSummary(): Array<{
+  id: number;
   student_name: string;
   work_type: string;
   status: string;
@@ -135,7 +136,7 @@ export function getAllStudentsSummary(): Array<{
 }> {
   const db = getDb();
   return db.prepare(`
-    SELECT student_name, work_type, status, attempt_number, created_at as last_date, wave
+    SELECT id, student_name, work_type, status, attempt_number, created_at as last_date, wave
     FROM attempts
     WHERE id IN (
       SELECT MAX(id) FROM attempts GROUP BY student_name
@@ -151,6 +152,24 @@ export function getTodayAttempts(): AttemptRow[] {
     WHERE DATE(created_at) = DATE('now')
     ORDER BY created_at DESC
   `).all() as AttemptRow[];
+}
+
+export function getAttemptById(id: number): AttemptRow | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM attempts WHERE id = ?').get(id) as AttemptRow | undefined;
+}
+
+export function getAttemptsByStudent(studentName: string): AttemptRow[] {
+  const db = getDb();
+  return db.prepare(
+    'SELECT * FROM attempts WHERE student_name = ? ORDER BY created_at DESC'
+  ).all(studentName) as AttemptRow[];
+}
+
+export function deleteAttempt(id: number): boolean {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM attempts WHERE id = ?').run(id);
+  return result.changes > 0;
 }
 
 // --- Settings ---
