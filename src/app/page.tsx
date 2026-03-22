@@ -217,7 +217,7 @@ export default function StudentPage() {
       <div className="min-h-screen bg-slate-50">
         <Header />
         <main className="max-w-3xl mx-auto px-6 py-8">
-          <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 mb-4 text-sm text-amber-800">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 mb-4 text-sm text-amber-800 print:hidden">
             Несогласны с результатами анализа? Напишите нам{' '}
             <a href="mailto:example@hse.ru" className="font-semibold underline">example@hse.ru</a>
           </div>

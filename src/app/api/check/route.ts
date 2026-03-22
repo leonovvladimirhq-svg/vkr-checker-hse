@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
 
     // --- Анализ через GPT ---
     const gptResults = await analyzeDocument(workType, usesAI, doc, undefined, dbAnalysis, checklist);
-    const results = mergeResults(checklist, gptResults, dbLink, dbAnalysis);
+    const results = mergeResults(checklist, gptResults, dbLink, dbAnalysis, presLink);
 
     // --- Определение статуса ---
     const failedCount = results.filter(r => r.passed === false).length;

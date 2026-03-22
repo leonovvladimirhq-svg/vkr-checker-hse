@@ -269,11 +269,30 @@ export function mergeResults(
   gptResults: GPTCheckResult,
   dbLink: string,
   dbAnalysis?: DbAnalysisResult | null,
+  presLink?: string,
 ): CheckResult[] {
   return checklist.map(item => {
     // Фиксированные пункты (отмечено студентом)
     if (item.fixed) {
       return { ...item, passed: true, note: 'Отмечено студентом' };
+    }
+
+    // Ссылка на презентацию: учитываем ссылку из формы
+    if (item.id === 'pres_link') {
+      const gptResult = gptResults[item.id];
+      // Если GPT нашёл ссылку в документе — ОК
+      if (gptResult?.passed) {
+        return { ...item, passed: true, note: gptResult.note || '' };
+      }
+      // Если студент указал ссылку в форме — тоже ОК
+      if (presLink && presLink.trim()) {
+        return { ...item, passed: true, note: 'Ссылка на презентацию указана студентом в форме проверки' };
+      }
+      // Иначе — результат GPT или не пройдено
+      if (gptResult) {
+        return { ...item, passed: gptResult.passed, note: gptResult.note || '' };
+      }
+      return { ...item, passed: false, note: 'Ссылка на презентацию не найдена ни в документе, ни в форме' };
     }
 
     // Проверка доступности БД по ссылке
