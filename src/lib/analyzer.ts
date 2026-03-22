@@ -6,6 +6,7 @@
 import OpenAI from 'openai';
 import { WorkType, CheckItem, CheckResult } from './checklist';
 import { ParsedDocument, prepareTextForGPT } from './parser';
+import { DbAnalysisResult } from './db-analyzer';
 
 interface GPTCheckResult {
   [checkId: string]: {
@@ -73,7 +74,7 @@ function buildSystemPrompt(): string {
 /**
  * Построение промпта с пунктами проверки для конкретного типа работы
  */
-function buildCheckPrompt(type: WorkType, usesAI: boolean, doc: ParsedDocument): string {
+function buildCheckPrompt(type: WorkType, usesAI: boolean, doc: ParsedDocument, dbAnalysis?: DbAnalysisResult | null): string {
   let checks = '';
 
   if (type === 'project') {
@@ -114,14 +115,30 @@ function buildCheckPrompt(type: WorkType, usesAI: boolean, doc: ParsedDocument):
 - ai_compliance: Использование ИИ не нарушает академическую честность`;
   }
 
+  // Пункт проверки БД (если данные получены с Яндекс.Диска)
+  if (dbAnalysis?.accessible && dbAnalysis.description) {
+    checks += `
+
+Проверяемые пункты БАЗЫ ДАННЫХ:
+- db_files_present: Файлы в папке БД соответствуют заявленным методам исследования. Оцени: есть ли аудиофайлы для интервью, таблицы для опросов, кодировочные таблицы и т.д. Будь мягким — если хотя бы частично файлы соответствуют, ставь passed: true.`;
+  }
+
   const preparedText = prepareTextForGPT(doc.text);
 
   // Дополнительная информация для GPT
-  const meta = `
+  let meta = `
 Метаданные документа:
 - Количество слов: ${doc.wordCount}
 - Оценка страниц: ~${doc.pageEstimate}
 - Найденные заголовки: ${doc.headings.slice(0, 30).join(' | ') || 'не найдены'}`;
+
+  // Добавляем информацию о БД если доступна
+  if (dbAnalysis?.accessible && dbAnalysis.description) {
+    meta += `
+
+СОДЕРЖИМОЕ БАЗЫ ДАННЫХ (Яндекс.Диск):
+${dbAnalysis.description}`;
+  }
 
   return `${checks}
 ${meta}
@@ -161,7 +178,8 @@ export async function analyzeDocument(
   type: WorkType,
   usesAI: boolean,
   doc: ParsedDocument,
-  apiKey?: string
+  apiKey?: string,
+  dbAnalysis?: DbAnalysisResult | null,
 ): Promise<GPTCheckResult> {
   const key = apiKey || process.env.OPENAI_API_KEY;
   if (!key) throw new Error('OpenAI API Key не указан');
@@ -176,7 +194,7 @@ export async function analyzeDocument(
     model,
     messages: [
       { role: 'system', content: buildSystemPrompt() },
-      { role: 'user', content: buildCheckPrompt(type, usesAI, doc) },
+      { role: 'user', content: buildCheckPrompt(type, usesAI, doc, dbAnalysis) },
     ],
     temperature: 0.1,
   };
@@ -228,11 +246,41 @@ export function mergeResults(
   checklist: CheckItem[],
   gptResults: GPTCheckResult,
   dbLink: string,
+  dbAnalysis?: DbAnalysisResult | null,
 ): CheckResult[] {
   return checklist.map(item => {
     // Фиксированные пункты (отмечено студентом)
     if (item.fixed) {
       return { ...item, passed: true, note: 'Отмечено студентом' };
+    }
+
+    // Проверка доступности БД по ссылке
+    if (item.id === 'db_opens') {
+      if (!dbLink) {
+        return { ...item, passed: false, note: 'Ссылка на базу данных не предоставлена' };
+      }
+      if (dbAnalysis) {
+        if (dbAnalysis.accessible) {
+          return { ...item, passed: true, note: `Ссылка доступна. Найдено файлов: ${dbAnalysis.fileCount}` };
+        } else {
+          return { ...item, passed: false, note: dbAnalysis.error || 'Ссылка недоступна' };
+        }
+      }
+      return { ...item, passed: null, note: 'Ссылка предоставлена — не удалось проверить автоматически' };
+    }
+
+    // Проверка файлов БД через GPT
+    if (item.id === 'db_files_present') {
+      // Если GPT проверил этот пункт
+      const gptResult = gptResults[item.id];
+      if (gptResult) {
+        return { ...item, passed: gptResult.passed, note: gptResult.note || '' };
+      }
+      // Если БД недоступна или не анализировалась
+      if (!dbAnalysis?.accessible) {
+        return { ...item, passed: null, note: 'Требуется ручная проверка — не удалось получить данные с Яндекс.Диска' };
+      }
+      return { ...item, passed: null, note: 'Не удалось проверить автоматически' };
     }
 
     // GPT-проверяемые пункты
@@ -241,18 +289,9 @@ export function mergeResults(
       return { ...item, passed: gptResult.passed, note: gptResult.note || '' };
     }
 
-    // Проверка наличия ссылки на БД
-    if (item.id === 'db_opens') {
-      return {
-        ...item,
-        passed: !!dbLink,
-        note: dbLink ? 'Ссылка предоставлена — требуется ручная проверка доступности' : 'Ссылка не предоставлена',
-      };
-    }
-
     // Пункты базы данных — ручная проверка
     if (!item.auto) {
-      return { ...item, passed: null, note: 'Требуется ручная проверка базы данных. Загрузите данные в формате Excel (.xlsx) для автоматической проверки.' };
+      return { ...item, passed: null, note: 'Требуется ручная проверка' };
     }
 
     return { ...item, passed: false, note: 'Не удалось проверить автоматически' };

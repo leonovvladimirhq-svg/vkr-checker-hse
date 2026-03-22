@@ -425,16 +425,16 @@ export default function StudentPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div>
-              <label className="block text-sm font-semibold mb-1.5">Ссылка на базу данных *</label>
+              <label className="block text-sm font-semibold mb-1.5">Ссылка на базу данных (Яндекс.Диск) *</label>
               <input type="url" value={dbLink} onChange={e => setDbLink(e.target.value)}
-                placeholder="https://drive.google.com/..."
+                placeholder="https://disk.yandex.ru/d/..."
                 className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
             </div>
             {workType === 'project' && (
               <div>
                 <label className="block text-sm font-semibold mb-1.5">Ссылка на презентацию *</label>
                 <input type="url" value={presLink} onChange={e => setPresLink(e.target.value)}
-                  placeholder="https://drive.google.com/..."
+                  placeholder="https://disk.yandex.ru/d/..."
                   className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
               </div>
             )}

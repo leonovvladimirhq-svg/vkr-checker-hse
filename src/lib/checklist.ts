@@ -82,7 +82,8 @@ export function getChecklist(
   }
 
   // --- База данных ---
-  items.push({ id: 'db_opens', section: 'База данных', text: 'База данных открывается по ссылке', auto: false });
+  items.push({ id: 'db_opens', section: 'База данных', text: 'База данных открывается по ссылке', auto: true });
+  items.push({ id: 'db_files_present', section: 'База данных', text: 'Файлы БД соответствуют заявленным методам исследования', auto: true });
 
   // Методы эмпирической части
   empMethods.forEach(m => {

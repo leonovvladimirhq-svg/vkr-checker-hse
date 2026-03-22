@@ -7,6 +7,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { parseDocument } from '@/lib/parser';
 import { analyzeDocument, mergeResults } from '@/lib/analyzer';
 import { getChecklist, WorkType, ResearchMethod } from '@/lib/checklist';
+import { getPublicResourceInfo } from '@/lib/yandex-disk';
+import { analyzeDatabase, DbAnalysisResult } from '@/lib/db-analyzer';
 
 export const maxDuration = 120; // Увеличенный таймаут для GPT-анализа
 
@@ -46,12 +48,24 @@ export async function POST(req: NextRequest) {
     const fileBuffer = Buffer.from(await file.arrayBuffer());
     const doc = await parseDocument(fileBuffer, file.name);
 
+    // --- Анализ базы данных через Яндекс.Диск API ---
+    let dbAnalysis: DbAnalysisResult | null = null;
+    if (dbLink) {
+      try {
+        const folderInfo = await getPublicResourceInfo(dbLink);
+        dbAnalysis = await analyzeDatabase(dbLink, folderInfo);
+      } catch (err) {
+        console.error('DB analysis error (non-critical):', err);
+        // Не блокируем проверку — БД уйдёт в ручную проверку
+      }
+    }
+
     // --- Анализ через GPT ---
-    const gptResults = await analyzeDocument(workType, usesAI, doc);
+    const gptResults = await analyzeDocument(workType, usesAI, doc, undefined, dbAnalysis);
 
     // --- Сборка чек-листа ---
     const checklist = getChecklist(workType, empMethods, compMethods, usesAI);
-    const results = mergeResults(checklist, gptResults, dbLink);
+    const results = mergeResults(checklist, gptResults, dbLink, dbAnalysis);
 
     // --- Определение статуса ---
     const failedCount = results.filter(r => r.passed === false).length;
