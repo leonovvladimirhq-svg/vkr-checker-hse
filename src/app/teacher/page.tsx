@@ -244,14 +244,14 @@ export default function TeacherPage() {
             <h1 className="text-xl font-bold">Проверка ВКР</h1>
             <p className="text-xs opacity-75 mt-0.5">Панель преподавателя</p>
           </div>
-          <nav className="flex gap-1">
+          <nav className="flex gap-1 print:hidden">
             <Link href="/" className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition">
               Студент
             </Link>
             <span className="bg-white/30 px-4 py-2 rounded-lg text-sm font-medium">Преподаватель</span>
           </nav>
         </div>
-        <div className="border-t border-white/10">
+        <div className="border-t border-white/10 print:hidden">
           <div className="max-w-5xl mx-auto px-6 py-1.5 text-xs text-white/60">
             Нашли ошибку? Сообщите разработчику:{' '}
             <a href="mailto:vleonov@hse.ru" className="underline hover:text-white/80">vleonov@hse.ru</a>
@@ -262,13 +262,13 @@ export default function TeacherPage() {
       <main className="max-w-5xl mx-auto px-6 py-8">
         {/* Уведомление */}
         {message && (
-          <div className="bg-blue-50 border border-blue-200 text-blue-700 rounded-lg px-4 py-3 mb-6 text-sm">
+          <div className="bg-blue-50 border border-blue-200 text-blue-700 rounded-lg px-4 py-3 mb-6 text-sm print:hidden">
             {message}
           </div>
         )}
 
         {/* Настройки */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6 print:hidden">
           <h2 className="text-lg font-bold text-blue-800 mb-4">Настройка email-дайджеста</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div>
@@ -300,7 +300,7 @@ export default function TeacherPage() {
         </div>
 
         {/* Статистика */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 print:hidden">
           <StatCard num={stats.total} label="Всего студентов" color="text-blue-600" />
           <StatCard num={stats.passed} label="Зачёт" color="text-emerald-600" />
           <StatCard num={stats.failed} label="Незачёт" color="text-red-600" />
@@ -308,14 +308,20 @@ export default function TeacherPage() {
         </div>
 
         {/* Сводная таблица */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6">
-          <h2 className="text-lg font-bold text-blue-800 mb-4">Сводная таблица студентов</h2>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6 print:shadow-none print:border-0 print:p-0">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-bold text-blue-800">Сводная таблица студентов</h2>
+            <button onClick={() => window.print()}
+              className="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 transition print:hidden">
+              Выгрузить в PDF
+            </button>
+          </div>
           {data?.students && data.students.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50">
-                    <th className="w-8 px-2 py-2.5 border-b-2 border-slate-200"></th>
+                    <th className="w-8 px-2 py-2.5 border-b-2 border-slate-200 print:hidden"></th>
                     <th className="text-left px-3 py-2.5 font-semibold border-b-2 border-slate-200">ФИО</th>
                     <th className="text-left px-3 py-2.5 font-semibold border-b-2 border-slate-200">Тип</th>
                     <th className="text-left px-3 py-2.5 font-semibold border-b-2 border-slate-200">Статус</th>
@@ -330,7 +336,7 @@ export default function TeacherPage() {
                       <tr key={`student-${i}`}
                         onClick={() => toggleStudent(s.student_name)}
                         className="hover:bg-blue-50 cursor-pointer transition-colors">
-                        <td className="px-2 py-2.5 border-b border-slate-100 text-center text-slate-400">
+                        <td className="px-2 py-2.5 border-b border-slate-100 text-center text-slate-400 print:hidden">
                           <span className={`inline-block transition-transform ${expandedStudent === s.student_name ? 'rotate-90' : ''}`}>
                             &#9654;
                           </span>
@@ -346,7 +352,7 @@ export default function TeacherPage() {
                       </tr>
                       {/* Раскрытые попытки студента */}
                       {expandedStudent === s.student_name && (
-                        <tr key={`attempts-${i}`}>
+                        <tr key={`attempts-${i}`} className="print:hidden">
                           <td colSpan={7} className="px-0 py-0 border-b border-slate-200">
                             <div className="bg-slate-50 px-6 py-3">
                               {loadingAttempts ? (
@@ -412,7 +418,7 @@ export default function TeacherPage() {
         </div>
 
         {/* Дневной дайджест */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 print:hidden">
           <h2 className="text-lg font-bold text-blue-800 mb-4">Загрузки за сегодня</h2>
           {todayAttempts.length > 0 ? (
             <div className="space-y-2">
@@ -436,7 +442,7 @@ export default function TeacherPage() {
 
       {/* Модальное окно деталей проверки */}
       {(selectedAttempt || loadingDetail) && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center pt-10 overflow-y-auto"
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center pt-10 overflow-y-auto print:hidden"
           onClick={() => { setSelectedAttempt(null); setLoadingDetail(false); }}>
           <div className="bg-white rounded-xl shadow-xl max-w-3xl w-full mx-4 mb-10"
             onClick={e => e.stopPropagation()}>
