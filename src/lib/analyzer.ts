@@ -126,7 +126,18 @@ function buildCheckPrompt(type: WorkType, usesAI: boolean, doc: ParsedDocument, 
     if (checklist) {
       const dbItems = checklist.filter(item => item.auto && item.section.startsWith('База данных') && item.id !== 'db_opens' && item.id !== 'db_files_present');
       for (const item of dbItems) {
-        dbChecks += `\n- ${item.id}: ${item.text}. Проверь по списку файлов в папке БД. Будь мягким — если есть файлы, подходящие по названию или содержимому, ставь passed: true.`;
+        let extra = '';
+        // Пояснения для GPT о синонимах и правилах подсчёта
+        if (item.id.endsWith('_qc_sheet')) {
+          extra = ' ВАЖНО: «Кодировочный лист» и «Кодировочная таблица» — это синонимы. Любой xlsx/csv файл с кодировками/категориями подходит.';
+        }
+        if (item.id.endsWith('_int_count')) {
+          extra = ' ВАЖНО: Считай аудиофайлы (.mp3, .wav и т.д.) ВО ВСЕХ подпапках, включая вложенные. Имена файлов содержат путь подпапки (напр. «Записи/interview1.mp3»). Файлы транскриптов (.docx) — это расшифровки интервью, НЕ считай их как отдельные интервью. Считай ТОЛЬКО аудиофайлы.';
+        }
+        if (item.id.endsWith('_fg_count')) {
+          extra = ' ВАЖНО: Считай аудиофайлы (.mp3, .wav и т.д.) во всех подпапках. Файлы транскриптов (.docx) не считаются как отдельные фокус-группы.';
+        }
+        dbChecks += `\n- ${item.id}: ${item.text}. Проверь по списку файлов в папке БД. Будь мягким — если есть файлы, подходящие по названию или содержимому, ставь passed: true.${extra}`;
       }
     }
 
