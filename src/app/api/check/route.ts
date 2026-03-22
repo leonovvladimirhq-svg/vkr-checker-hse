@@ -7,7 +7,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { parseDocument } from '@/lib/parser';
 import { analyzeDocument, mergeResults } from '@/lib/analyzer';
 import { getChecklist, WorkType, ResearchMethod } from '@/lib/checklist';
-import { getAttemptCount, insertAttempt } from '@/lib/db';
 
 export const maxDuration = 120; // Увеличенный таймаут для GPT-анализа
 
@@ -43,17 +42,6 @@ export async function POST(req: NextRequest) {
     const empMethods: ResearchMethod[] = JSON.parse(empMethodsRaw);
     const compMethods: ResearchMethod[] = JSON.parse(compMethodsRaw);
 
-    // --- Проверка лимита попыток ---
-    const attemptCount = getAttemptCount(studentName);
-    if (attemptCount >= 3) {
-      return NextResponse.json(
-        { error: 'Все 3 попытки использованы. Обратитесь к научному руководителю.' },
-        { status: 403 }
-      );
-    }
-
-    const attemptNumber = attemptCount + 1;
-
     // --- Парсинг документа через mammoth/pdf-parse ---
     const fileBuffer = Buffer.from(await file.arrayBuffer());
     const doc = await parseDocument(fileBuffer, file.name);
@@ -71,28 +59,10 @@ export async function POST(req: NextRequest) {
     const manualCount = results.filter(r => r.passed === null).length;
     const overallStatus = failedCount === 0 ? 'pass' : 'fail';
 
-    // --- Сохранение в БД ---
-    const attemptId = insertAttempt({
-      student_name: studentName,
-      work_type: workType,
-      attempt_number: attemptNumber,
-      status: overallStatus,
-      results_json: JSON.stringify(results),
-      extracted_text_preview: doc.text.substring(0, 2000),
-      file_name: file.name,
-      db_link: dbLink,
-      pres_link: presLink,
-      methods_json: JSON.stringify({ emp: empMethods, comp: compMethods }),
-      uses_ai: usesAI,
-    });
-
-    // --- Ответ ---
+    // --- Ответ (без сохранения в БД — студент сохраняет явно) ---
     return NextResponse.json({
-      id: attemptId,
       studentName,
       workType,
-      attemptNumber,
-      maxAttempts: 3,
       status: overallStatus,
       results,
       summary: {
@@ -107,6 +77,16 @@ export async function POST(req: NextRequest) {
         pageEstimate: doc.pageEstimate,
         headingsFound: doc.headings.length,
         textPreview: doc.text.substring(0, 500) + '...',
+      },
+      // Метаданные для последующего сохранения
+      saveData: {
+        extractedTextPreview: doc.text.substring(0, 2000),
+        dbLink,
+        presLink,
+        methodsJson: JSON.stringify({ emp: empMethods, comp: compMethods }),
+        usesAI,
+        fileName: file.name,
+        resultsJson: JSON.stringify(results),
       },
     });
 

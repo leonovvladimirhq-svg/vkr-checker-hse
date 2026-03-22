@@ -13,11 +13,8 @@ interface CheckResultItem {
 }
 
 interface CheckResponse {
-  id: number;
   studentName: string;
   workType: string;
-  attemptNumber: number;
-  maxAttempts: number;
   status: 'pass' | 'fail';
   results: CheckResultItem[];
   summary: { total: number; passed: number; failed: number; manual: number };
@@ -27,6 +24,15 @@ interface CheckResponse {
     pageEstimate: number;
     headingsFound: number;
     textPreview: string;
+  };
+  saveData: {
+    extractedTextPreview: string;
+    dbLink: string;
+    presLink: string;
+    methodsJson: string;
+    usesAI: boolean;
+    fileName: string;
+    resultsJson: string;
   };
   error?: string;
 }
@@ -49,6 +55,9 @@ export default function StudentPage() {
   const [result, setResult] = useState<CheckResponse | null>(null);
   const [error, setError] = useState('');
   const [attempts, setAttempts] = useState<Array<{ status: string }>>([]);
+  const [savingResult, setSavingResult] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -140,15 +149,48 @@ export default function StudentPage() {
     }
   };
 
+  // Сохранение результата
+  const handleSave = async () => {
+    if (!result) return;
+    setSavingResult(true);
+    setSaveError('');
+    try {
+      const res = await fetch('/api/attempts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studentName: result.studentName,
+          workType: result.workType,
+          status: result.status,
+          resultsJson: result.saveData.resultsJson,
+          extractedTextPreview: result.saveData.extractedTextPreview,
+          fileName: result.saveData.fileName,
+          dbLink: result.saveData.dbLink,
+          presLink: result.saveData.presLink,
+          methodsJson: result.saveData.methodsJson,
+          usesAI: result.saveData.usesAI,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Ошибка сохранения');
+      }
+      setSaved(true);
+      setAttempts(prev => [...prev, { status: result.status }]);
+    } catch (err: any) {
+      setSaveError(err.message || 'Ошибка сохранения результата');
+    } finally {
+      setSavingResult(false);
+    }
+  };
+
   // Сброс для новой попытки
   const resetForm = () => {
-    if (result && result.attemptNumber >= result.maxAttempts) {
-      alert('Все 3 попытки использованы. Обратитесь к научному руководителю.');
-      return;
-    }
     setResult(null);
     setFile(null);
     setError('');
+    setSaved(false);
+    setSaveError('');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -188,21 +230,6 @@ export default function StudentPage() {
                 <p className="text-sm text-slate-500 mt-1">
                   {result.studentName} &middot; {result.workType === 'project' ? 'Магистерский проект' : 'Магистерская диссертация'} &middot; {new Date().toLocaleDateString('ru-RU')}
                 </p>
-                {/* Счётчик попыток */}
-                <div className="flex items-center gap-2 mt-3">
-                  <span className="text-xs text-slate-500">Попытка {result.attemptNumber} из {result.maxAttempts}:</span>
-                  {Array.from({ length: result.maxAttempts }, (_, i) => {
-                    const idx = i + 1;
-                    if (idx < result.attemptNumber) {
-                      const prev = attempts[idx - 1];
-                      return <span key={i} className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white ${prev?.status === 'pass' ? 'bg-emerald-600' : 'bg-red-600'}`}>{idx}</span>;
-                    }
-                    if (idx === result.attemptNumber) {
-                      return <span key={i} className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white bg-blue-600">{idx}</span>;
-                    }
-                    return <span key={i} className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-slate-400 bg-slate-200">{idx}</span>;
-                  })}
-                </div>
               </div>
               <div className={`px-6 py-3 rounded-lg text-lg font-bold border-2 ${result.status === 'pass' ? 'bg-emerald-50 text-emerald-700 border-emerald-600' : 'bg-red-50 text-red-700 border-red-600'}`}>
                 {result.status === 'pass' ? '✓ ЗАЧЁТ' : '✗ НЕЗАЧЁТ'}
@@ -240,8 +267,19 @@ export default function StudentPage() {
               </div>
             ))}
 
+            {/* Ошибка сохранения */}
+            {saveError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 mt-4 text-sm">
+                {saveError}
+              </div>
+            )}
+
             {/* Кнопки */}
             <div className="flex gap-3 justify-end mt-6 print:hidden">
+              <button onClick={handleSave} disabled={savingResult || saved}
+                className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition ${saved ? 'bg-emerald-100 text-emerald-700 border border-emerald-300 cursor-default' : 'bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-slate-300'}`}>
+                {saved ? '✓ Результат сохранён' : savingResult ? 'Сохранение...' : 'Сохранить результат'}
+              </button>
               <button onClick={exportPDF} className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-slate-100 hover:bg-slate-200 border border-slate-200">
                 Скачать PDF
               </button>
@@ -433,7 +471,7 @@ function Header() {
       <div className="border-t border-white/10 print:hidden">
         <div className="max-w-3xl mx-auto px-6 py-1.5 text-xs text-white/60">
           Нашли ошибку? Сообщите разработчику:{' '}
-          <a href="mailto:example@hse.ru" className="underline hover:text-white/80">example@hse.ru</a>
+          <a href="mailto:vleonov@hse.ru" className="underline hover:text-white/80">vleonov@hse.ru</a>
         </div>
       </div>
     </header>

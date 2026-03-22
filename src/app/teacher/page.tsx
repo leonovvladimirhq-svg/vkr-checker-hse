@@ -52,6 +52,12 @@ interface StudentsData {
 }
 
 export default function TeacherPage() {
+  // Авторизация
+  const [authenticated, setAuthenticated] = useState(false);
+  const [loginInput, setLoginInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [loginError, setLoginError] = useState('');
+
   const [data, setData] = useState<StudentsData | null>(null);
   const [todayAttempts, setTodayAttempts] = useState<AttemptRow[]>([]);
   const [digestEmail, setDigestEmail] = useState('');
@@ -72,10 +78,20 @@ export default function TeacherPage() {
   // Подтверждение удаления
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
 
+  const handleLogin = () => {
+    if (loginInput === 'admin 1029' && passwordInput === 'hsevkrch12') {
+      setAuthenticated(true);
+      setLoginError('');
+    } else {
+      setLoginError('Неверный логин или пароль');
+    }
+  };
+
   useEffect(() => {
+    if (!authenticated) return;
     fetchData();
     fetchToday();
-  }, []);
+  }, [authenticated]);
 
   const fetchData = async () => {
     try {
@@ -185,6 +201,40 @@ export default function TeacherPage() {
 
   const stats = data?.stats || { total: 57, passed: 0, failed: 0, pending: 57 };
 
+  // Форма входа
+  if (!authenticated) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 w-full max-w-sm">
+          <h2 className="text-lg font-bold text-blue-800 mb-1">Вход в панель преподавателя</h2>
+          <p className="text-xs text-slate-500 mb-5">Введите логин и пароль для доступа</p>
+          {loginError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 mb-4 text-sm">
+              {loginError}
+            </div>
+          )}
+          <div className="mb-4">
+            <label className="block text-sm font-semibold mb-1.5">Логин</label>
+            <input type="text" value={loginInput} onChange={e => setLoginInput(e.target.value)}
+              placeholder="Введите логин"
+              className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+          </div>
+          <div className="mb-5">
+            <label className="block text-sm font-semibold mb-1.5">Пароль</label>
+            <input type="password" value={passwordInput} onChange={e => setPasswordInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleLogin()}
+              placeholder="Введите пароль"
+              className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+          </div>
+          <button onClick={handleLogin}
+            className="w-full px-5 py-2.5 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 transition">
+            Войти
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
@@ -204,7 +254,7 @@ export default function TeacherPage() {
         <div className="border-t border-white/10">
           <div className="max-w-5xl mx-auto px-6 py-1.5 text-xs text-white/60">
             Нашли ошибку? Сообщите разработчику:{' '}
-            <a href="mailto:example@hse.ru" className="underline hover:text-white/80">example@hse.ru</a>
+            <a href="mailto:vleonov@hse.ru" className="underline hover:text-white/80">vleonov@hse.ru</a>
           </div>
         </div>
       </header>
