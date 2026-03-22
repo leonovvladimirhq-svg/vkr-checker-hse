@@ -1,10 +1,11 @@
 // ============================================================
 // Анализатор базы данных из Яндекс.Диска
-// Скачивает файлы, парсит xlsx/csv, формирует описание для GPT
+// Скачивает файлы, парсит xlsx/csv/docx/pdf, формирует описание для GPT
 // ============================================================
 
 import { YaDiskFileInfo, YaDiskFolderResult, downloadPublicFile } from './yandex-disk';
 import * as XLSX from 'xlsx';
+import mammoth from 'mammoth';
 
 export interface DbAnalysisResult {
   accessible: boolean;
@@ -14,7 +15,8 @@ export interface DbAnalysisResult {
 }
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 МБ
-const PARSEABLE_EXTENSIONS = ['.xlsx', '.xls', '.csv', '.tsv'];
+const PARSEABLE_EXTENSIONS = ['.xlsx', '.xls', '.csv', '.tsv', '.docx', '.pdf'];
+const DOC_TEXT_PREVIEW_LENGTH = 1000;
 
 /**
  * Проанализировать содержимое папки БД с Яндекс.Диска
@@ -47,7 +49,8 @@ export async function analyzeDatabase(
   // Группируем файлы по типу
   const audioFiles = folderInfo.files.filter(f => isAudio(f));
   const spreadsheetFiles = folderInfo.files.filter(f => isSpreadsheet(f));
-  const otherFiles = folderInfo.files.filter(f => !isAudio(f) && !isSpreadsheet(f));
+  const documentFiles = folderInfo.files.filter(f => isDocument(f));
+  const otherFiles = folderInfo.files.filter(f => !isAudio(f) && !isSpreadsheet(f) && !isDocument(f));
 
   // Аудиофайлы — только метаданные
   if (audioFiles.length > 0) {
@@ -68,7 +71,27 @@ export async function analyzeDatabase(
       }
 
       // Пытаемся скачать и распарсить
-      const parsed = await parseSpreadsheetFile(publicUrl, f);
+      const parsed = await parseFileContent(publicUrl, f);
+      if (parsed) {
+        lines.push(`  - ${f.name} (${formatSize(f.size)}):`);
+        lines.push(parsed);
+      } else {
+        lines.push(`  - ${f.name} (${formatSize(f.size)}) — не удалось распарсить`);
+      }
+    }
+    lines.push('');
+  }
+
+  // Документы — скачиваем и извлекаем текст
+  if (documentFiles.length > 0) {
+    lines.push(`Документы (${documentFiles.length}):`);
+    for (const f of documentFiles) {
+      if (f.size > MAX_FILE_SIZE) {
+        lines.push(`  - ${f.name} (${formatSize(f.size)}) — файл слишком большой для автоматического анализа`);
+        continue;
+      }
+
+      const parsed = await parseFileContent(publicUrl, f);
       if (parsed) {
         lines.push(`  - ${f.name} (${formatSize(f.size)}):`);
         lines.push(parsed);
@@ -95,9 +118,9 @@ export async function analyzeDatabase(
 }
 
 /**
- * Скачать и распарсить xlsx/csv файл
+ * Скачать и распарсить файл (xlsx/csv/docx/pdf)
  */
-async function parseSpreadsheetFile(publicUrl: string, file: YaDiskFileInfo): Promise<string | null> {
+async function parseFileContent(publicUrl: string, file: YaDiskFileInfo): Promise<string | null> {
   try {
     const buffer = await downloadPublicFile(publicUrl, file.path);
     if (!buffer) return null;
@@ -110,6 +133,14 @@ async function parseSpreadsheetFile(publicUrl: string, file: YaDiskFileInfo): Pr
 
     if (ext === '.xlsx' || ext === '.xls') {
       return parseXlsxBuffer(buffer);
+    }
+
+    if (ext === '.docx') {
+      return parseDocxBuffer(buffer);
+    }
+
+    if (ext === '.pdf') {
+      return parsePdfBuffer(buffer);
     }
 
     return null;
@@ -154,6 +185,32 @@ function parseCsvBuffer(buffer: Buffer, separator: string): string {
   return `    ${rows.length} строк, колонки: ${headers.slice(0, 10).join(', ')}${headers.length > 10 ? ` и ещё ${headers.length - 10}` : ''}`;
 }
 
+/**
+ * Парсинг Word документа
+ */
+async function parseDocxBuffer(buffer: Buffer): Promise<string> {
+  const result = await mammoth.extractRawText({ buffer });
+  const text = result.value;
+  const words = text.split(/\s+/).filter(w => w.length > 0);
+  const preview = text.substring(0, DOC_TEXT_PREVIEW_LENGTH).trim();
+
+  return `    ${words.length} слов\n    Начало: «${preview}${text.length > DOC_TEXT_PREVIEW_LENGTH ? '...' : ''}»`;
+}
+
+/**
+ * Парсинг PDF документа
+ */
+async function parsePdfBuffer(buffer: Buffer): Promise<string> {
+  const pdfParse = (await import('pdf-parse')).default;
+  const data = await pdfParse(buffer);
+  const text = data.text;
+  const words = text.split(/\s+/).filter((w: string) => w.length > 0);
+  const preview = text.substring(0, DOC_TEXT_PREVIEW_LENGTH).trim();
+  const pages = data.numpages || 0;
+
+  return `    ${pages} стр., ${words.length} слов\n    Начало: «${preview}${text.length > DOC_TEXT_PREVIEW_LENGTH ? '...' : ''}»`;
+}
+
 // --- Утилиты ---
 
 function isAudio(f: YaDiskFileInfo): boolean {
@@ -163,7 +220,12 @@ function isAudio(f: YaDiskFileInfo): boolean {
 
 function isSpreadsheet(f: YaDiskFileInfo): boolean {
   const ext = getExtension(f.name);
-  return PARSEABLE_EXTENSIONS.includes(ext);
+  return ['.xlsx', '.xls', '.csv', '.tsv'].includes(ext);
+}
+
+function isDocument(f: YaDiskFileInfo): boolean {
+  const ext = getExtension(f.name);
+  return ['.docx', '.pdf'].includes(ext);
 }
 
 function getExtension(filename: string): string {
