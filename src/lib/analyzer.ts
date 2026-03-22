@@ -74,7 +74,7 @@ function buildSystemPrompt(): string {
 /**
  * Построение промпта с пунктами проверки для конкретного типа работы
  */
-function buildCheckPrompt(type: WorkType, usesAI: boolean, doc: ParsedDocument, dbAnalysis?: DbAnalysisResult | null): string {
+function buildCheckPrompt(type: WorkType, usesAI: boolean, doc: ParsedDocument, dbAnalysis?: DbAnalysisResult | null, checklist?: CheckItem[]): string {
   let checks = '';
 
   if (type === 'project') {
@@ -115,12 +115,22 @@ function buildCheckPrompt(type: WorkType, usesAI: boolean, doc: ParsedDocument, 
 - ai_compliance: Использование ИИ не нарушает академическую честность`;
   }
 
-  // Пункт проверки БД (если данные получены с Яндекс.Диска)
+  // Пункты проверки БД (если данные получены с Яндекс.Диска)
   if (dbAnalysis?.accessible && dbAnalysis.description) {
-    checks += `
+    let dbChecks = `
 
-Проверяемые пункты БАЗЫ ДАННЫХ:
+Проверяемые пункты БАЗЫ ДАННЫХ (проверяй по содержимому папки Яндекс.Диска, описанному ниже):
 - db_files_present: Файлы в папке БД соответствуют заявленным методам исследования. Оцени: есть ли аудиофайлы для интервью, таблицы для опросов, кодировочные таблицы и т.д. Будь мягким — если хотя бы частично файлы соответствуют, ставь passed: true.`;
+
+    // Динамически добавляем все auto:true пункты из секции «База данных»
+    if (checklist) {
+      const dbItems = checklist.filter(item => item.auto && item.section.startsWith('База данных') && item.id !== 'db_opens' && item.id !== 'db_files_present');
+      for (const item of dbItems) {
+        dbChecks += `\n- ${item.id}: ${item.text}. Проверь по списку файлов в папке БД. Будь мягким — если есть файлы, подходящие по названию или содержимому, ставь passed: true.`;
+      }
+    }
+
+    checks += dbChecks;
   }
 
   const preparedText = prepareTextForGPT(doc.text);
@@ -180,6 +190,7 @@ export async function analyzeDocument(
   doc: ParsedDocument,
   apiKey?: string,
   dbAnalysis?: DbAnalysisResult | null,
+  checklist?: CheckItem[],
 ): Promise<GPTCheckResult> {
   const key = apiKey || process.env.OPENAI_API_KEY;
   if (!key) throw new Error('OpenAI API Key не указан');
@@ -194,7 +205,7 @@ export async function analyzeDocument(
     model,
     messages: [
       { role: 'system', content: buildSystemPrompt() },
-      { role: 'user', content: buildCheckPrompt(type, usesAI, doc, dbAnalysis) },
+      { role: 'user', content: buildCheckPrompt(type, usesAI, doc, dbAnalysis, checklist) },
     ],
     temperature: 0.1,
   };
@@ -292,6 +303,14 @@ export function mergeResults(
     // Пункты базы данных — ручная проверка
     if (!item.auto) {
       return { ...item, passed: null, note: 'Требуется ручная проверка' };
+    }
+
+    // auto:true пункты БД, но GPT не ответил
+    if (item.section.startsWith('База данных')) {
+      if (!dbAnalysis?.accessible) {
+        return { ...item, passed: null, note: 'Требуется ручная проверка — не удалось получить данные с Яндекс.Диска' };
+      }
+      return { ...item, passed: null, note: 'Не удалось проверить автоматически' };
     }
 
     return { ...item, passed: false, note: 'Не удалось проверить автоматически' };

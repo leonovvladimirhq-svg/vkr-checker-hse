@@ -60,11 +60,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // --- Анализ через GPT ---
-    const gptResults = await analyzeDocument(workType, usesAI, doc, undefined, dbAnalysis);
-
     // --- Сборка чек-листа ---
     const checklist = getChecklist(workType, empMethods, compMethods, usesAI);
+
+    // --- Анализ через GPT ---
+    const gptResults = await analyzeDocument(workType, usesAI, doc, undefined, dbAnalysis, checklist);
     const results = mergeResults(checklist, gptResults, dbLink, dbAnalysis);
 
     // --- Определение статуса ---

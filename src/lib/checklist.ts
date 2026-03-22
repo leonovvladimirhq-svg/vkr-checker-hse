@@ -108,39 +108,39 @@ function getMethodItems(method: string, part: string): CheckItem[] {
   switch (m) {
     case 'interviews':
       items.push(
-        { id: `${part}_int_count`, section: `База данных (${partLabel})`, text: 'Глубинные интервью: не менее 10 файлов (7 для смешанного метода)', auto: false },
+        { id: `${part}_int_count`, section: `База данных (${partLabel})`, text: 'Глубинные интервью: не менее 10 файлов (7 для смешанного метода)', auto: true },
         { id: `${part}_int_duration`, section: `База данных (${partLabel})`, text: 'Каждый файл не менее 45 минут (30 для экспертного интервью)', auto: false },
         { id: `${part}_int_quality`, section: `База данных (${partLabel})`, text: 'Аудио разборчивое, соответствует теме исследования', auto: false },
       );
       break;
     case 'focus_groups':
       items.push(
-        { id: `${part}_fg_count`, section: `База данных (${partLabel})`, text: 'Фокус-группы: не менее 5 файлов (3 для смешанного метода)', auto: false },
+        { id: `${part}_fg_count`, section: `База данных (${partLabel})`, text: 'Фокус-группы: не менее 5 файлов (3 для смешанного метода)', auto: true },
         { id: `${part}_fg_duration`, section: `База данных (${partLabel})`, text: 'Каждый файл не менее 45 минут', auto: false },
         { id: `${part}_fg_quality`, section: `База данных (${partLabel})`, text: 'Аудио разборчивое, соответствует теме исследования', auto: false },
       );
       break;
     case 'text_analysis':
       items.push(
-        { id: `${part}_ta_materials`, section: `База данных (${partLabel})`, text: 'Исходные материалы для кодирования', auto: false },
-        { id: `${part}_ta_coding`, section: `База данных (${partLabel})`, text: 'Кодировочная таблица', auto: false },
+        { id: `${part}_ta_materials`, section: `База данных (${partLabel})`, text: 'Исходные материалы для кодирования', auto: true },
+        { id: `${part}_ta_coding`, section: `База данных (${partLabel})`, text: 'Кодировочная таблица', auto: true },
       );
       break;
     case 'survey':
       items.push(
-        { id: `${part}_srv_data`, section: `База данных (${partLabel})`, text: 'Таблица с выгрузкой данных', auto: false },
-        { id: `${part}_srv_meta`, section: `База данных (${partLabel})`, text: 'Метаданные (время и дата заполнения)', auto: false },
-        { id: `${part}_srv_stats`, section: `База данных (${partLabel})`, text: 'Выгрузка из программы для статистического анализа (SPSS, Jupyter, Excel)', auto: false },
+        { id: `${part}_srv_data`, section: `База данных (${partLabel})`, text: 'Таблица с выгрузкой данных', auto: true },
+        { id: `${part}_srv_meta`, section: `База данных (${partLabel})`, text: 'Метаданные (время и дата заполнения)', auto: true },
+        { id: `${part}_srv_stats`, section: `База данных (${partLabel})`, text: 'Выгрузка из программы для статистического анализа (SPSS, Jupyter, Excel)', auto: true },
       );
       break;
     case 'quant_content':
       items.push(
-        { id: `${part}_qc_sheet`, section: `База данных (${partLabel})`, text: 'Кодировочный лист', auto: false },
+        { id: `${part}_qc_sheet`, section: `База данных (${partLabel})`, text: 'Кодировочный лист', auto: true },
       );
       break;
     case 'monitoring':
       items.push(
-        { id: `${part}_mon_data`, section: `База данных (${partLabel})`, text: 'Первичные или вторичные данные', auto: false },
+        { id: `${part}_mon_data`, section: `База данных (${partLabel})`, text: 'Первичные или вторичные данные', auto: true },
       );
       break;
   }
