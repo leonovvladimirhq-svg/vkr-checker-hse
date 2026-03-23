@@ -38,6 +38,12 @@ interface CheckResponse {
 }
 
 export default function StudentPage() {
+  // Авторизация
+  const [authenticated, setAuthenticated] = useState(false);
+  const [loginInput, setLoginInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [loginError, setLoginError] = useState('');
+
   // Форма
   const [studentName, setStudentName] = useState('');
   const [workType, setWorkType] = useState<'project' | 'dissertation' | ''>('');
@@ -61,6 +67,15 @@ export default function StudentPage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
+
+  const handleLogin = () => {
+    if (loginInput === 'student' && passwordInput === 'hse2025') {
+      setAuthenticated(true);
+      setLoginError('');
+    } else {
+      setLoginError('Неверный логин или пароль');
+    }
+  };
 
   // Валидация формы
   const isFormValid = studentName.trim() && workType && file && dbLink.trim() &&
@@ -200,6 +215,43 @@ export default function StudentPage() {
   };
 
   // ============ RENDER ============
+
+  // Если не авторизован — показываем экран входа
+  if (!authenticated) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <Header />
+        <div className="flex items-center justify-center" style={{ minHeight: 'calc(100vh - 120px)' }}>
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 w-full max-w-sm">
+            <h2 className="text-lg font-bold text-blue-800 mb-1">Вход в систему проверки ВКР</h2>
+            <p className="text-xs text-slate-500 mb-5">Введите логин и пароль для доступа</p>
+            {loginError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 mb-4 text-sm">
+                {loginError}
+              </div>
+            )}
+            <div className="mb-4">
+              <label className="block text-sm font-semibold mb-1.5">Логин</label>
+              <input type="text" value={loginInput} onChange={e => setLoginInput(e.target.value)}
+                placeholder="Введите логин"
+                className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div className="mb-5">
+              <label className="block text-sm font-semibold mb-1.5">Пароль</label>
+              <input type="password" value={passwordInput} onChange={e => setPasswordInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleLogin()}
+                placeholder="Введите пароль"
+                className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <button onClick={handleLogin}
+              className="w-full px-5 py-2.5 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 transition">
+              Войти
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Если есть результат — показываем отчёт
   if (result) {
