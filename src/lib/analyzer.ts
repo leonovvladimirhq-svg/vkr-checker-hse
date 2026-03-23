@@ -178,18 +178,24 @@ ${preparedText}
 function getModelParams(model: string): {
   useMaxCompletionTokens: boolean;
   supportsJsonFormat: boolean;
+  supportsTemperature: boolean;
 } {
   // Модели серии o* и gpt-5+ используют max_completion_tokens вместо max_tokens
   // и могут не поддерживать response_format
-  const newStyleModels = /^(o[1-9]|gpt-5|gpt-4o)/i;
   const legacyModels = /^(gpt-4-|gpt-3)/i;
+  // Модели, которые не поддерживают кастомный temperature (только default=1)
+  const noTemperatureModels = /^(o[1-9]|gpt-5-nano)/i;
 
   if (legacyModels.test(model)) {
-    return { useMaxCompletionTokens: false, supportsJsonFormat: true };
+    return { useMaxCompletionTokens: false, supportsJsonFormat: true, supportsTemperature: true };
   }
 
-  // gpt-4o-mini, gpt-5, gpt-5.2, o3-mini и т.д. — новый стиль
-  return { useMaxCompletionTokens: true, supportsJsonFormat: true };
+  // gpt-4o-mini, gpt-5, gpt-5.2, gpt-5-nano, o3-mini и т.д. — новый стиль
+  return {
+    useMaxCompletionTokens: true,
+    supportsJsonFormat: true,
+    supportsTemperature: !noTemperatureModels.test(model),
+  };
 }
 
 /**
@@ -207,7 +213,7 @@ export async function analyzeDocument(
   if (!key) throw new Error('OpenAI API Key не указан');
 
   const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-  const { useMaxCompletionTokens, supportsJsonFormat } = getModelParams(model);
+  const { useMaxCompletionTokens, supportsJsonFormat, supportsTemperature } = getModelParams(model);
 
   const openai = new OpenAI({ apiKey: key });
 
@@ -218,7 +224,7 @@ export async function analyzeDocument(
       { role: 'system', content: buildSystemPrompt() },
       { role: 'user', content: buildCheckPrompt(type, usesAI, doc, dbAnalysis, checklist) },
     ],
-    temperature: 0.1,
+    ...(supportsTemperature ? { temperature: 0.1 } : {}),
   };
 
   // max_tokens vs max_completion_tokens
