@@ -283,20 +283,16 @@ export function mergeResults(
       return { ...item, passed: true, note: 'Отмечено студентом' };
     }
 
-    // Ссылка на презентацию: учитываем ссылку из формы
+    // Ссылка на презентацию: содержание невозможно проверить автоматически
     if (item.id === 'pres_link') {
       const gptResult = gptResults[item.id];
-      // Если GPT нашёл ссылку в документе — ОК
-      if (gptResult?.passed) {
-        return { ...item, passed: true, note: gptResult.note || '' };
-      }
-      // Если студент указал ссылку в форме — тоже ОК
-      if (presLink && presLink.trim()) {
-        return { ...item, passed: true, note: 'Ссылка на презентацию указана студентом в форме проверки' };
-      }
-      // Иначе — результат GPT или не пройдено
-      if (gptResult) {
-        return { ...item, passed: gptResult.passed, note: gptResult.note || '' };
+      const hasLinkInDoc = gptResult?.passed;
+      const hasLinkInForm = presLink && presLink.trim();
+
+      if (hasLinkInDoc || hasLinkInForm) {
+        // Ссылка есть, но содержание требует ручной проверки
+        const source = hasLinkInDoc ? 'найдена в документе' : 'указана студентом в форме';
+        return { ...item, passed: null, note: `Ссылка ${source}. Содержание требует проверки преподавателем` };
       }
       return { ...item, passed: false, note: 'Ссылка на презентацию не найдена ни в документе, ни в форме' };
     }

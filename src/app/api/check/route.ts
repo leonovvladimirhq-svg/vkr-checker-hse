@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
     const failedCount = results.filter(r => r.passed === false).length;
     const passedCount = results.filter(r => r.passed === true).length;
     const manualCount = results.filter(r => r.passed === null).length;
-    const overallStatus = failedCount === 0 ? 'pass' : 'fail';
+    const overallStatus = failedCount > 0 ? 'fail' : manualCount > 0 ? 'pending' : 'pass';
 
     // --- Ответ (без сохранения в БД — студент сохраняет явно) ---
     return NextResponse.json({

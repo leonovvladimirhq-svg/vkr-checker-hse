@@ -22,6 +22,7 @@ export async function GET(req: NextRequest) {
     // Статистика
     const passCount = students.filter(s => s.status === 'pass').length;
     const failCount = students.filter(s => s.status === 'fail').length;
+    const pendingReviewCount = students.filter(s => s.status === 'pending').length;
 
     return NextResponse.json({
       students,
@@ -29,7 +30,8 @@ export async function GET(req: NextRequest) {
         total: 57, // Количество студентов в программе
         passed: passCount,
         failed: failCount,
-        pending: 57 - passCount - failCount,
+        pendingReview: pendingReviewCount,
+        notSubmitted: 57 - passCount - failCount - pendingReviewCount,
       },
       settings: {
         digestEmail,

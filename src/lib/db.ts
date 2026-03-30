@@ -25,7 +25,7 @@ function initSchema(db: Database.Database) {
       student_name TEXT NOT NULL,
       work_type TEXT NOT NULL CHECK(work_type IN ('project', 'dissertation')),
       attempt_number INTEGER NOT NULL CHECK(attempt_number BETWEEN 1 AND 3),
-      status TEXT NOT NULL CHECK(status IN ('pass', 'fail')),
+      status TEXT NOT NULL CHECK(status IN ('pass', 'fail', 'pending')),
       results_json TEXT NOT NULL,
       extracted_text_preview TEXT,
       file_name TEXT,
@@ -45,6 +45,39 @@ function initSchema(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_attempts_student ON attempts(student_name);
     CREATE INDEX IF NOT EXISTS idx_attempts_date ON attempts(created_at);
   `);
+
+  // Миграция: расширить CHECK constraint для поддержки статуса 'pending'
+  // SQLite не позволяет ALTER TABLE для CHECK — пересоздаём таблицу
+  try {
+    const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='attempts'").get() as { sql: string } | undefined;
+    if (tableInfo && tableInfo.sql && !tableInfo.sql.includes("'pending'")) {
+      db.exec(`
+        ALTER TABLE attempts RENAME TO attempts_old;
+        CREATE TABLE attempts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          student_name TEXT NOT NULL,
+          work_type TEXT NOT NULL CHECK(work_type IN ('project', 'dissertation')),
+          attempt_number INTEGER NOT NULL CHECK(attempt_number BETWEEN 1 AND 3),
+          status TEXT NOT NULL CHECK(status IN ('pass', 'fail', 'pending')),
+          results_json TEXT NOT NULL,
+          extracted_text_preview TEXT,
+          file_name TEXT,
+          db_link TEXT,
+          pres_link TEXT,
+          methods_json TEXT,
+          uses_ai INTEGER DEFAULT 0,
+          wave INTEGER DEFAULT 1,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO attempts SELECT * FROM attempts_old;
+        DROP TABLE attempts_old;
+        CREATE INDEX IF NOT EXISTS idx_attempts_student ON attempts(student_name);
+        CREATE INDEX IF NOT EXISTS idx_attempts_date ON attempts(created_at);
+      `);
+    }
+  } catch (e) {
+    console.error('Migration error (non-critical):', e);
+  }
 
   // Default settings
   const insertSetting = db.prepare(
@@ -164,6 +197,12 @@ export function getAttemptsByStudent(studentName: string): AttemptRow[] {
   return db.prepare(
     'SELECT * FROM attempts WHERE student_name = ? ORDER BY created_at DESC'
   ).all(studentName) as AttemptRow[];
+}
+
+export function updateAttemptStatus(id: number, newStatus: string): boolean {
+  const db = getDb();
+  const result = db.prepare('UPDATE attempts SET status = ? WHERE id = ?').run(newStatus, id);
+  return result.changes > 0;
 }
 
 export function deleteAttempt(id: number): boolean {

@@ -3,7 +3,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getAttemptById, getAttemptsByStudent, deleteAttempt, getAttemptCount, insertAttempt } from '@/lib/db';
+import { getAttemptById, getAttemptsByStudent, deleteAttempt, getAttemptCount, insertAttempt, updateAttemptStatus } from '@/lib/db';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
@@ -68,6 +68,31 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error('Save attempt error:', error);
     return NextResponse.json({ error: error.message || 'Ошибка сохранения' }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const id = req.nextUrl.searchParams.get('id');
+    const body = await req.json();
+    const { status } = body;
+
+    if (!id || !status) {
+      return NextResponse.json({ error: 'Укажите id и status' }, { status: 400 });
+    }
+
+    if (!['pass', 'fail', 'pending'].includes(status)) {
+      return NextResponse.json({ error: 'Недопустимый статус' }, { status: 400 });
+    }
+
+    const updated = updateAttemptStatus(Number(id), status);
+    if (!updated) {
+      return NextResponse.json({ error: 'Попытка не найдена' }, { status: 404 });
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message || 'Ошибка обновления' }, { status: 500 });
   }
 }
 

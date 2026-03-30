@@ -47,7 +47,7 @@ interface AttemptDetail {
 
 interface StudentsData {
   students: StudentSummary[];
-  stats: { total: number; passed: number; failed: number; pending: number };
+  stats: { total: number; passed: number; failed: number; pendingReview: number; notSubmitted: number };
   settings: { digestEmail: string; currentWave: string };
 }
 
@@ -199,7 +199,34 @@ export default function TeacherPage() {
     }
   };
 
-  const stats = data?.stats || { total: 57, passed: 0, failed: 0, pending: 57 };
+  // Поставить зачёт
+  const handleApprove = async (attemptId: number) => {
+    try {
+      const res = await fetch(`/api/attempts?id=${attemptId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'pass' }),
+      });
+      if (res.ok) {
+        setMessage('Зачёт поставлен');
+        setTimeout(() => setMessage(''), 3000);
+        fetchData();
+        fetchToday();
+        // Обновить раскрытый список
+        if (expandedStudent) {
+          setStudentAttempts(prev => prev.map(a => a.id === attemptId ? { ...a, status: 'pass' } : a));
+        }
+        // Обновить модалку
+        if (selectedAttempt && selectedAttempt.id === attemptId) {
+          setSelectedAttempt({ ...selectedAttempt, status: 'pass' });
+        }
+      }
+    } catch {
+      setMessage('Ошибка обновления статуса');
+    }
+  };
+
+  const stats = data?.stats || { total: 57, passed: 0, failed: 0, pendingReview: 0, notSubmitted: 57 };
 
   // Форма входа
   if (!authenticated) {
@@ -300,11 +327,12 @@ export default function TeacherPage() {
         </div>
 
         {/* Статистика */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 print:hidden">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6 print:hidden">
           <StatCard num={stats.total} label="Всего студентов" color="text-blue-600" />
           <StatCard num={stats.passed} label="Зачёт" color="text-emerald-600" />
           <StatCard num={stats.failed} label="Незачёт" color="text-red-600" />
-          <StatCard num={stats.pending} label="Не загрузили" color="text-amber-600" />
+          <StatCard num={stats.pendingReview} label="Ожидает проверки" color="text-amber-600" />
+          <StatCard num={stats.notSubmitted} label="Не загрузили" color="text-slate-400" />
         </div>
 
         {/* Сводная таблица */}
@@ -362,8 +390,8 @@ export default function TeacherPage() {
                                   <p className="text-xs font-semibold text-slate-500 mb-2">Все попытки ({studentAttempts.length}):</p>
                                   {studentAttempts.map(a => (
                                     <div key={a.id} className="flex items-center gap-3 bg-white rounded-lg px-4 py-2.5 border border-slate-200">
-                                      <span className={`text-base ${a.status === 'pass' ? 'text-emerald-600' : 'text-red-600'}`}>
-                                        {a.status === 'pass' ? '✓' : '✗'}
+                                      <span className={`text-base ${a.status === 'pass' ? 'text-emerald-600' : a.status === 'pending' ? 'text-amber-600' : 'text-red-600'}`}>
+                                        {a.status === 'pass' ? '✓' : a.status === 'pending' ? '⊘' : '✗'}
                                       </span>
                                       <span className="text-sm flex-1">
                                         Попытка {a.attempt_number}
@@ -373,6 +401,13 @@ export default function TeacherPage() {
                                         {new Date(a.created_at).toLocaleString('ru-RU')}
                                       </span>
                                       <StatusChip status={a.status} />
+                                      {a.status === 'pending' && (
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); handleApprove(a.id); }}
+                                          className="px-3 py-1 text-xs font-semibold bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition">
+                                          Поставить зачёт
+                                        </button>
+                                      )}
                                       <button
                                         onClick={(e) => { e.stopPropagation(); openDetail(a.id); }}
                                         className="px-3 py-1 text-xs font-semibold bg-blue-600 text-white rounded-md hover:bg-blue-700 transition">
@@ -424,8 +459,8 @@ export default function TeacherPage() {
             <div className="space-y-2">
               {todayAttempts.map((a, i) => (
                 <div key={i} className="flex items-center gap-3 py-2 border-b border-slate-100 last:border-0">
-                  <span className={`text-lg ${a.status === 'pass' ? 'text-emerald-600' : 'text-red-600'}`}>
-                    {a.status === 'pass' ? '✓' : '✗'}
+                  <span className={`text-lg ${a.status === 'pass' ? 'text-emerald-600' : a.status === 'pending' ? 'text-amber-600' : 'text-red-600'}`}>
+                    {a.status === 'pass' ? '✓' : a.status === 'pending' ? '⊘' : '✗'}
                   </span>
                   <span className="text-sm flex-1">{a.student_name}</span>
                   <StatusChip status={a.status} />
@@ -452,7 +487,7 @@ export default function TeacherPage() {
                 <p className="text-sm text-slate-500">Загрузка...</p>
               </div>
             ) : selectedAttempt && (
-              <AttemptDetailModal attempt={selectedAttempt} onClose={() => setSelectedAttempt(null)} />
+              <AttemptDetailModal attempt={selectedAttempt} onClose={() => setSelectedAttempt(null)} onApprove={handleApprove} />
             )}
           </div>
         </div>
@@ -462,7 +497,7 @@ export default function TeacherPage() {
 }
 
 // ============ МОДАЛЬНОЕ ОКНО ДЕТАЛЕЙ ============
-function AttemptDetailModal({ attempt, onClose }: { attempt: AttemptDetail; onClose: () => void }) {
+function AttemptDetailModal({ attempt, onClose, onApprove }: { attempt: AttemptDetail; onClose: () => void; onApprove: (id: number) => void }) {
   const results = attempt.results || [];
   const passed = results.filter(r => r.passed === true).length;
   const failed = results.filter(r => r.passed === false).length;
@@ -492,9 +527,19 @@ function AttemptDetailModal({ attempt, onClose }: { attempt: AttemptDetail; onCl
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <div className={`px-5 py-2.5 rounded-lg text-base font-bold border-2 ${attempt.status === 'pass' ? 'bg-emerald-50 text-emerald-700 border-emerald-600' : 'bg-red-50 text-red-700 border-red-600'}`}>
-              {attempt.status === 'pass' ? '✓ ЗАЧЁТ' : '✗ НЕЗАЧЁТ'}
+            <div className={`px-5 py-2.5 rounded-lg text-base font-bold border-2 ${
+              attempt.status === 'pass' ? 'bg-emerald-50 text-emerald-700 border-emerald-600' :
+              attempt.status === 'pending' ? 'bg-amber-50 text-amber-700 border-amber-500' :
+              'bg-red-50 text-red-700 border-red-600'
+            }`}>
+              {attempt.status === 'pass' ? '✓ ЗАЧЁТ' : attempt.status === 'pending' ? '⊘ ОЖИДАЕТ ПРОВЕРКУ' : '✗ НЕЗАЧЁТ'}
             </div>
+            {attempt.status === 'pending' && (
+              <button onClick={() => onApprove(attempt.id)}
+                className="px-4 py-2.5 rounded-lg text-sm font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition">
+                Поставить зачёт
+              </button>
+            )}
             <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
           </div>
         </div>
@@ -559,7 +604,8 @@ function StatusChip({ status }: { status: string }) {
   const labels = {
     pass: 'Зачёт',
     fail: 'Незачёт',
-  }[status] || 'Ожидание';
+    pending: 'Ожидает проверки',
+  }[status] || 'Неизвестно';
 
   return (
     <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${styles}`}>

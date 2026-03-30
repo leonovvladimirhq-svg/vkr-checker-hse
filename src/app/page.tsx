@@ -15,7 +15,7 @@ interface CheckResultItem {
 interface CheckResponse {
   studentName: string;
   workType: string;
-  status: 'pass' | 'fail';
+  status: 'pass' | 'fail' | 'pending';
   results: CheckResultItem[];
   summary: { total: number; passed: number; failed: number; manual: number };
   documentInfo: {
@@ -283,8 +283,12 @@ export default function StudentPage() {
                   {result.studentName} &middot; {result.workType === 'project' ? 'Магистерский проект' : 'Магистерская диссертация'} &middot; {new Date().toLocaleDateString('ru-RU')}
                 </p>
               </div>
-              <div className={`px-6 py-3 rounded-lg text-lg font-bold border-2 ${result.status === 'pass' ? 'bg-emerald-50 text-emerald-700 border-emerald-600' : 'bg-red-50 text-red-700 border-red-600'}`}>
-                {result.status === 'pass' ? '✓ ЗАЧЁТ' : '✗ НЕЗАЧЁТ'}
+              <div className={`px-6 py-3 rounded-lg text-lg font-bold border-2 ${
+                result.status === 'pass' ? 'bg-emerald-50 text-emerald-700 border-emerald-600' :
+                result.status === 'pending' ? 'bg-amber-50 text-amber-700 border-amber-500' :
+                'bg-red-50 text-red-700 border-red-600'
+              }`}>
+                {result.status === 'pass' ? '✓ ЗАЧЁТ' : result.status === 'pending' ? '⊘ ОЖИДАЙТЕ ПРОВЕРКУ ПРЕПОДАВАТЕЛЕМ' : '✗ НЕЗАЧЁТ'}
               </div>
             </div>
 
@@ -486,7 +490,7 @@ export default function StudentPage() {
               <div>
                 <label className="block text-sm font-semibold mb-1.5">Ссылка на презентацию *</label>
                 <input type="url" value={presLink} onChange={e => setPresLink(e.target.value)}
-                  placeholder="https://disk.yandex.ru/d/..."
+                  placeholder="Прямая ссылка на файл презентации (не на папку)"
                   className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
               </div>
             )}
