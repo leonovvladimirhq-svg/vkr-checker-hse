@@ -11,7 +11,9 @@ export type ResearchMethod =
   | 'text_analysis'
   | 'survey'
   | 'quant_content'
-  | 'monitoring';
+  | 'monitoring'
+  | 'expert_interview'
+  | 'other';
 
 export interface CheckItem {
   id: string;
@@ -34,7 +36,8 @@ export function getChecklist(
   type: WorkType,
   empMethods: ResearchMethod[],
   compMethods: ResearchMethod[],
-  usesAI: boolean
+  usesAI: boolean,
+  otherMethodName?: string,
 ): CheckItem[] {
   const items: CheckItem[] = [];
 
@@ -87,20 +90,20 @@ export function getChecklist(
 
   // Методы эмпирической части
   empMethods.forEach(m => {
-    items.push(...getMethodItems(m, 'empirical'));
+    items.push(...getMethodItems(m, 'empirical', otherMethodName));
   });
 
   // Методы анализа конкурентов (только для проекта)
   if (type === 'project' && compMethods.length > 0) {
     compMethods.forEach(m => {
-      items.push(...getMethodItems(m, 'competitor'));
+      items.push(...getMethodItems(m, 'competitor', otherMethodName));
     });
   }
 
   return items;
 }
 
-function getMethodItems(method: string, part: string): CheckItem[] {
+function getMethodItems(method: string, part: string, otherMethodName?: string): CheckItem[] {
   const partLabel = part === 'empirical' ? 'эмпирической части' : 'анализа конкурентов';
   const m = method.replace('_comp', '');
   const items: CheckItem[] = [];
@@ -141,6 +144,19 @@ function getMethodItems(method: string, part: string): CheckItem[] {
     case 'monitoring':
       items.push(
         { id: `${part}_mon_data`, section: `База данных (${partLabel})`, text: 'Первичные или вторичные данные', auto: true },
+      );
+      break;
+    case 'expert_interview':
+      items.push(
+        { id: `${part}_ei_files`, section: `База данных (${partLabel})`, text: 'Экспертное интервью: файлы записей или транскриптов', auto: false },
+        { id: `${part}_ei_quality`, section: `База данных (${partLabel})`, text: 'Экспертное интервью: качество и соответствие теме', auto: false },
+      );
+      break;
+    case 'other':
+      const methodLabel = otherMethodName || 'Другой метод';
+      items.push(
+        { id: `${part}_other_data`, section: `База данных (${partLabel})`, text: `${methodLabel}: данные исследования`, auto: false },
+        { id: `${part}_other_quality`, section: `База данных (${partLabel})`, text: `${methodLabel}: соответствие теме и методу`, auto: false },
       );
       break;
   }

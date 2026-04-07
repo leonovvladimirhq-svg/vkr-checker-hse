@@ -42,6 +42,7 @@ interface AttemptDetail {
   db_link: string | null;
   pres_link: string | null;
   uses_ai: number;
+  feedback: string | null;
   created_at: string;
 }
 
@@ -573,6 +574,16 @@ function AttemptDetailModal({ attempt, onClose, onApprove }: { attempt: AttemptD
           </div>
         ))}
       </div>
+
+      {/* Отзыв студента */}
+      {attempt.feedback && (
+        <div className="px-7 pb-4">
+          <h3 className="text-sm font-semibold text-blue-800 mb-2">Отзыв студента</h3>
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-slate-700">
+            {attempt.feedback}
+          </div>
+        </div>
+      )}
 
       <div className="p-5 border-t border-slate-200 flex justify-end">
         <button onClick={onClose}

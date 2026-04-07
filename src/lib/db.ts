@@ -79,6 +79,17 @@ function initSchema(db: Database.Database) {
     console.error('Migration error (non-critical):', e);
   }
 
+  // Миграция: добавить поле feedback
+  try {
+    const colCheck = db.prepare("PRAGMA table_info(attempts)").all() as Array<{name: string}>;
+    const hasFeedback = colCheck.some((c: any) => c.name === 'feedback');
+    if (!hasFeedback) {
+      db.exec("ALTER TABLE attempts ADD COLUMN feedback TEXT");
+    }
+  } catch (e) {
+    console.error('Migration feedback error (non-critical):', e);
+  }
+
   // Default settings
   const insertSetting = db.prepare(
     'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)'
@@ -103,6 +114,7 @@ export interface AttemptRow {
   methods_json: string | null;
   uses_ai: number;
   wave: number;
+  feedback: string | null;
   created_at: string;
 }
 
@@ -134,12 +146,13 @@ export function insertAttempt(data: {
   methods_json?: string;
   uses_ai?: boolean;
   wave?: number;
+  feedback?: string;
 }): number {
   const db = getDb();
   const stmt = db.prepare(`
     INSERT INTO attempts (student_name, work_type, attempt_number, status, results_json,
-      extracted_text_preview, file_name, db_link, pres_link, methods_json, uses_ai, wave)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      extracted_text_preview, file_name, db_link, pres_link, methods_json, uses_ai, wave, feedback)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
     data.student_name,
@@ -153,7 +166,8 @@ export function insertAttempt(data: {
     data.pres_link || null,
     data.methods_json || null,
     data.uses_ai ? 1 : 0,
-    data.wave || 1
+    data.wave || 1,
+    data.feedback || null
   );
   return result.lastInsertRowid as number;
 }

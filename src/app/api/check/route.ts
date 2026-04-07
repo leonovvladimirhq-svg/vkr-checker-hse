@@ -24,6 +24,7 @@ export async function POST(req: NextRequest) {
     const presLink = formData.get('presLink') as string || '';
     const empMethodsRaw = formData.get('empMethods') as string || '[]';
     const compMethodsRaw = formData.get('compMethods') as string || '[]';
+    const otherMethodName = formData.get('otherMethodName') as string || '';
     const file = formData.get('file') as File | null;
 
     // --- Валидация ---
@@ -61,7 +62,7 @@ export async function POST(req: NextRequest) {
     }
 
     // --- Сборка чек-листа ---
-    const checklist = getChecklist(workType, empMethods, compMethods, usesAI);
+    const checklist = getChecklist(workType, empMethods, compMethods, usesAI, otherMethodName || undefined);
 
     // --- Анализ через GPT ---
     const gptResults = await analyzeDocument(workType, usesAI, doc, undefined, dbAnalysis, checklist);
@@ -97,7 +98,7 @@ export async function POST(req: NextRequest) {
         extractedTextPreview: doc.text.substring(0, 2000),
         dbLink,
         presLink,
-        methodsJson: JSON.stringify({ emp: empMethods, comp: compMethods }),
+        methodsJson: JSON.stringify({ emp: empMethods, comp: compMethods, otherMethodName: otherMethodName || undefined }),
         usesAI,
         fileName: file.name,
         resultsJson: JSON.stringify(results),

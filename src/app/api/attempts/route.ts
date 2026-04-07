@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { studentName, workType, status, resultsJson, extractedTextPreview, fileName, dbLink, presLink, methodsJson, usesAI } = body;
+    const { studentName, workType, status, resultsJson, extractedTextPreview, fileName, dbLink, presLink, methodsJson, usesAI, feedback } = body;
 
     if (!studentName || !workType || !status || !resultsJson) {
       return NextResponse.json({ error: 'Не указаны обязательные поля' }, { status: 400 });
@@ -62,6 +62,7 @@ export async function POST(req: NextRequest) {
       pres_link: presLink || '',
       methods_json: methodsJson || '{}',
       uses_ai: usesAI || false,
+      feedback: feedback || '',
     });
 
     return NextResponse.json({ id: attemptId, attemptNumber, maxAttempts: 3 });

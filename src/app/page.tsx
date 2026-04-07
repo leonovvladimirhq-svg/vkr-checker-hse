@@ -52,6 +52,7 @@ export default function StudentPage() {
   const [presLink, setPresLink] = useState('');
   const [empMethods, setEmpMethods] = useState<string[]>([]);
   const [compMethods, setCompMethods] = useState<string[]>([]);
+  const [otherMethodName, setOtherMethodName] = useState('');
   const [file, setFile] = useState<File | null>(null);
 
   // Состояние
@@ -64,6 +65,7 @@ export default function StudentPage() {
   const [savingResult, setSavingResult] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [feedback, setFeedback] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -78,10 +80,13 @@ export default function StudentPage() {
   };
 
   // Валидация формы
-  const isFormValid = studentName.trim() && workType && file && dbLink.trim() &&
+  const nameWords = studentName.trim().split(/\s+/).filter(Boolean).length;
+  const hasOtherMethod = empMethods.includes('other') || compMethods.includes('other_comp');
+  const isFormValid = nameWords >= 2 && workType && file && dbLink.trim() &&
     (workType !== 'project' || presLink.trim()) &&
     empMethods.length > 0 &&
-    (workType !== 'dissertation' || empMethods.length >= 2);
+    (workType !== 'dissertation' || empMethods.length >= 2) &&
+    (!hasOtherMethod || otherMethodName.trim().length > 0);
 
   // Обработка методов
   const toggleMethod = (list: string[], setter: (v: string[]) => void, value: string) => {
@@ -128,6 +133,9 @@ export default function StudentPage() {
       formData.append('presLink', presLink);
       formData.append('empMethods', JSON.stringify(empMethods));
       formData.append('compMethods', JSON.stringify(compMethods));
+      if (otherMethodName.trim()) {
+        formData.append('otherMethodName', otherMethodName.trim());
+      }
       formData.append('file', file);
 
       setLoadingProgress(30);
@@ -184,6 +192,7 @@ export default function StudentPage() {
           presLink: result.saveData.presLink,
           methodsJson: result.saveData.methodsJson,
           usesAI: result.saveData.usesAI,
+          feedback,
         }),
       });
       const data = await res.json();
@@ -323,6 +332,18 @@ export default function StudentPage() {
               </div>
             ))}
 
+            {/* Отзыв студента */}
+            <div className="mt-6 mb-2 print:hidden">
+              <label className="block text-sm font-semibold mb-1.5">Отзыв (необязательно)</label>
+              <textarea
+                value={feedback}
+                onChange={e => setFeedback(e.target.value)}
+                placeholder="Оставьте комментарий или отзыв о процессе проверки..."
+                rows={3}
+                className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 resize-y"
+              />
+            </div>
+
             {/* Ошибка сохранения */}
             {saveError && (
               <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 mt-4 text-sm">
@@ -384,8 +405,9 @@ export default function StudentPage() {
             <div>
               <label className="block text-sm font-semibold mb-1.5">ФИО студента *</label>
               <input type="text" value={studentName} onChange={e => setStudentName(e.target.value)}
-                placeholder="Иванов Иван Иванович"
+                placeholder="Фамилия Имя Отчество"
                 className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+              <p className="text-xs text-slate-400 mt-1">Укажите полное ФИО (Фамилия Имя Отчество)</p>
             </div>
             <div>
               <label className="block text-sm font-semibold mb-1.5">Тип работы *</label>
@@ -422,6 +444,8 @@ export default function StudentPage() {
                 { val: 'survey', label: 'Опрос' },
                 { val: 'quant_content', label: 'Количественный контент-анализ' },
                 { val: 'monitoring', label: 'Мониторинговый анализ' },
+                { val: 'expert_interview', label: 'Экспертное интервью' },
+                { val: 'other', label: 'Другое' },
               ].map(m => (
                 <label key={m.val} className="flex items-center gap-2 py-1 cursor-pointer">
                   <input type="checkbox" checked={empMethods.includes(m.val)}
@@ -430,6 +454,16 @@ export default function StudentPage() {
                   <span className="text-sm">{m.label}</span>
                 </label>
               ))}
+              {/* Поле названия для метода «Другое» */}
+              {hasOtherMethod && (
+                <div className="mt-2 ml-6">
+                  <label className="block text-sm font-semibold mb-1 text-amber-700">Укажите название метода *</label>
+                  <input type="text" value={otherMethodName} onChange={e => setOtherMethodName(e.target.value)}
+                    placeholder="Например: нетнография, A/B тестирование..."
+                    className="w-full px-3.5 py-2.5 border border-amber-300 rounded-lg text-sm focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 bg-amber-50" />
+                  <p className="text-xs text-amber-600 mt-1">Обязательно заполните название выбранного метода</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -438,8 +472,10 @@ export default function StudentPage() {
             <div>
               <h3 className="text-sm font-semibold mb-2">Методы исследования (анализ конкурентов)</h3>
               {[
-                { val: 'text_analysis_comp', label: 'Методы анализа текстов' },
+                { val: 'text_analysis_comp', label: 'Другие методы анализа текста' },
                 { val: 'quant_content_comp', label: 'Количественный контент-анализ' },
+                { val: 'expert_interview_comp', label: 'Экспертное интервью' },
+                { val: 'other_comp', label: 'Другое' },
               ].map(m => (
                 <label key={m.val} className="flex items-center gap-2 py-1 cursor-pointer">
                   <input type="checkbox" checked={compMethods.includes(m.val)}
