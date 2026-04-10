@@ -5,3 +5,4 @@ node_modules/
 data/vkr.db
 data/vkr.db-shm
 data/vkr.db-wal
+data/uploads/

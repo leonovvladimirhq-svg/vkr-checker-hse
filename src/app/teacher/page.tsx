@@ -42,6 +42,7 @@ interface AttemptDetail {
   db_link: string | null;
   pres_link: string | null;
   uses_ai: number;
+  file_path: string | null;
   feedback: string | null;
   created_at: string;
 }
@@ -227,6 +228,21 @@ export default function TeacherPage() {
     }
   };
 
+  // Выгрузка в Excel
+  const exportExcel = async () => {
+    if (!data?.students?.length) return;
+    const XLSX = await import('xlsx');
+    const rows = data.students.map(s => ({
+      'ФИО': s.student_name,
+      'Статус': s.status === 'pass' ? 'Зачёт' : s.status === 'pending' ? 'Ожидает проверки' : 'Незачёт',
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [{ wch: 35 }, { wch: 20 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Студенты');
+    XLSX.writeFile(wb, 'студенты_вкр.xlsx');
+  };
+
   const stats = data?.stats || { total: 57, passed: 0, failed: 0, pendingReview: 0, notSubmitted: 57 };
 
   // Форма входа
@@ -340,10 +356,16 @@ export default function TeacherPage() {
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6 print:shadow-none print:border-0 print:p-0">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-bold text-blue-800">Сводная таблица студентов</h2>
-            <button onClick={() => window.print()}
-              className="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 transition print:hidden">
-              Выгрузить в PDF
-            </button>
+            <div className="flex gap-2 print:hidden">
+              <button onClick={exportExcel}
+                className="px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition">
+                Выгрузить в Excel
+              </button>
+              <button onClick={() => window.print()}
+                className="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 transition">
+                Выгрузить в PDF
+              </button>
+            </div>
           </div>
           {data?.students && data.students.length > 0 ? (
             <div className="overflow-x-auto">
@@ -525,6 +547,13 @@ function AttemptDetailModal({ attempt, onClose, onApprove }: { attempt: AttemptD
             <p className="text-xs text-slate-400 mt-1">
               {new Date(attempt.created_at).toLocaleString('ru-RU')}
               {attempt.file_name && <> &middot; {attempt.file_name}</>}
+              {attempt.file_path && (
+                <> &middot; <a
+                  href={`/api/download?id=${attempt.id}`}
+                  className="text-blue-600 hover:text-blue-800 font-semibold underline"
+                  onClick={e => e.stopPropagation()}
+                >Скачать работу</a></>
+              )}
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -585,7 +614,13 @@ function AttemptDetailModal({ attempt, onClose, onApprove }: { attempt: AttemptD
         </div>
       )}
 
-      <div className="p-5 border-t border-slate-200 flex justify-end">
+      <div className="p-5 border-t border-slate-200 flex justify-end gap-3">
+        {attempt.file_path && (
+          <a href={`/api/download?id=${attempt.id}`}
+            className="px-5 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 transition inline-flex items-center gap-1.5">
+            Скачать работу
+          </a>
+        )}
         <button onClick={onClose}
           className="px-5 py-2 rounded-lg text-sm font-semibold bg-slate-100 hover:bg-slate-200 border border-slate-200">
           Закрыть

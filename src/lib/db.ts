@@ -90,6 +90,17 @@ function initSchema(db: Database.Database) {
     console.error('Migration feedback error (non-critical):', e);
   }
 
+  // Миграция: добавить поле file_path для хранения загруженных файлов
+  try {
+    const colCheck2 = db.prepare("PRAGMA table_info(attempts)").all() as Array<{name: string}>;
+    const hasFilePath = colCheck2.some((c: any) => c.name === 'file_path');
+    if (!hasFilePath) {
+      db.exec("ALTER TABLE attempts ADD COLUMN file_path TEXT");
+    }
+  } catch (e) {
+    console.error('Migration file_path error (non-critical):', e);
+  }
+
   // Default settings
   const insertSetting = db.prepare(
     'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)'
@@ -114,6 +125,7 @@ export interface AttemptRow {
   methods_json: string | null;
   uses_ai: number;
   wave: number;
+  file_path: string | null;
   feedback: string | null;
   created_at: string;
 }
@@ -147,12 +159,13 @@ export function insertAttempt(data: {
   uses_ai?: boolean;
   wave?: number;
   feedback?: string;
+  file_path?: string;
 }): number {
   const db = getDb();
   const stmt = db.prepare(`
     INSERT INTO attempts (student_name, work_type, attempt_number, status, results_json,
-      extracted_text_preview, file_name, db_link, pres_link, methods_json, uses_ai, wave, feedback)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      extracted_text_preview, file_name, db_link, pres_link, methods_json, uses_ai, wave, feedback, file_path)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
     data.student_name,
@@ -167,7 +180,8 @@ export function insertAttempt(data: {
     data.methods_json || null,
     data.uses_ai ? 1 : 0,
     data.wave || 1,
-    data.feedback || null
+    data.feedback || null,
+    data.file_path || null
   );
   return result.lastInsertRowid as number;
 }

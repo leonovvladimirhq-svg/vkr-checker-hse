@@ -178,22 +178,25 @@ export default function StudentPage() {
     setSavingResult(true);
     setSaveError('');
     try {
+      const formData = new FormData();
+      formData.append('studentName', result.studentName);
+      formData.append('workType', result.workType);
+      formData.append('status', result.status);
+      formData.append('resultsJson', result.saveData.resultsJson);
+      formData.append('extractedTextPreview', result.saveData.extractedTextPreview);
+      formData.append('fileName', result.saveData.fileName);
+      formData.append('dbLink', result.saveData.dbLink);
+      formData.append('presLink', result.saveData.presLink);
+      formData.append('methodsJson', result.saveData.methodsJson);
+      formData.append('usesAI', String(result.saveData.usesAI));
+      formData.append('feedback', feedback);
+      if (file) {
+        formData.append('file', file);
+      }
+
       const res = await fetch('/api/attempts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          studentName: result.studentName,
-          workType: result.workType,
-          status: result.status,
-          resultsJson: result.saveData.resultsJson,
-          extractedTextPreview: result.saveData.extractedTextPreview,
-          fileName: result.saveData.fileName,
-          dbLink: result.saveData.dbLink,
-          presLink: result.saveData.presLink,
-          methodsJson: result.saveData.methodsJson,
-          usesAI: result.saveData.usesAI,
-          feedback,
-        }),
+        body: formData,
       });
       const data = await res.json();
       if (!res.ok) {
