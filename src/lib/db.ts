@@ -101,6 +101,28 @@ function initSchema(db: Database.Database) {
     console.error('Migration file_path error (non-critical):', e);
   }
 
+  // Миграция: добавить поле teacher_review для отзыва преподавателя
+  try {
+    const colCheck3 = db.prepare("PRAGMA table_info(attempts)").all() as Array<{name: string}>;
+    const hasTeacherReview = colCheck3.some((c: any) => c.name === 'teacher_review');
+    if (!hasTeacherReview) {
+      db.exec("ALTER TABLE attempts ADD COLUMN teacher_review TEXT");
+    }
+  } catch (e) {
+    console.error('Migration teacher_review error (non-critical):', e);
+  }
+
+  // Миграция: добавить поле tech_comment для технического комментария преподавателя
+  try {
+    const colCheck4 = db.prepare("PRAGMA table_info(attempts)").all() as Array<{name: string}>;
+    const hasTechComment = colCheck4.some((c: any) => c.name === 'tech_comment');
+    if (!hasTechComment) {
+      db.exec("ALTER TABLE attempts ADD COLUMN tech_comment TEXT");
+    }
+  } catch (e) {
+    console.error('Migration tech_comment error (non-critical):', e);
+  }
+
   // Default settings
   const insertSetting = db.prepare(
     'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)'
@@ -127,6 +149,8 @@ export interface AttemptRow {
   wave: number;
   file_path: string | null;
   feedback: string | null;
+  teacher_review: string | null;
+  tech_comment: string | null;
   created_at: string;
 }
 
@@ -230,6 +254,38 @@ export function getAttemptsByStudent(studentName: string): AttemptRow[] {
 export function updateAttemptStatus(id: number, newStatus: string): boolean {
   const db = getDb();
   const result = db.prepare('UPDATE attempts SET status = ? WHERE id = ?').run(newStatus, id);
+  return result.changes > 0;
+}
+
+export function updateAttemptFields(id: number, fields: {
+  status?: string;
+  teacher_review?: string;
+  tech_comment?: string;
+}): boolean {
+  const db = getDb();
+  const sets: string[] = [];
+  const values: any[] = [];
+
+  if (fields.status !== undefined) {
+    if (!['pass', 'fail', 'pending'].includes(fields.status)) {
+      throw new Error('Invalid status');
+    }
+    sets.push('status = ?');
+    values.push(fields.status);
+  }
+  if (fields.teacher_review !== undefined) {
+    sets.push('teacher_review = ?');
+    values.push(fields.teacher_review);
+  }
+  if (fields.tech_comment !== undefined) {
+    sets.push('tech_comment = ?');
+    values.push(fields.tech_comment);
+  }
+
+  if (sets.length === 0) return false;
+
+  values.push(id);
+  const result = db.prepare(`UPDATE attempts SET ${sets.join(', ')} WHERE id = ?`).run(...values);
   return result.changes > 0;
 }
 

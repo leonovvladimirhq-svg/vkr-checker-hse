@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { saveAuth, readAuth, clearAuth } from '@/lib/authCache';
 
 interface StudentSummary {
   id: number;
@@ -44,6 +45,8 @@ interface AttemptDetail {
   uses_ai: number;
   file_path: string | null;
   feedback: string | null;
+  teacher_review: string | null;
+  tech_comment: string | null;
   created_at: string;
 }
 
@@ -80,13 +83,30 @@ export default function TeacherPage() {
   // Подтверждение удаления
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
 
+  // Восстановление авторизации из localStorage при первом рендере (TTL 24 часа)
+  useEffect(() => {
+    if (readAuth('teacher')) {
+      setAuthenticated(true);
+    }
+  }, []);
+
   const handleLogin = () => {
     if (loginInput === 'admin 1029' && passwordInput === 'hsevkrch12') {
       setAuthenticated(true);
       setLoginError('');
+      saveAuth('teacher');
     } else {
       setLoginError('Неверный логин или пароль');
     }
+  };
+
+  const handleLogout = () => {
+    clearAuth('teacher');
+    setAuthenticated(false);
+    setLoginInput('');
+    setPasswordInput('');
+    setData(null);
+    setTodayAttempts([]);
   };
 
   useEffect(() => {
@@ -201,8 +221,16 @@ export default function TeacherPage() {
     }
   };
 
-  // Поставить зачёт
-  const handleApprove = async (attemptId: number) => {
+  // Поставить зачёт (или принудительно перезаписать "Незачёт")
+  const handleApprove = async (attemptId: number, currentStatus?: string) => {
+    // Для статуса "Незачёт" требуется подтверждение — это перезаписывает автоматическую оценку
+    if (currentStatus === 'fail') {
+      const ok = window.confirm(
+        'Вы действительно хотите принудительно поставить ЗАЧЁТ работе со статусом «Незачёт»?\n\n' +
+        'Это перезапишет автоматическую оценку системы.'
+      );
+      if (!ok) return;
+    }
     try {
       const res = await fetch(`/api/attempts?id=${attemptId}`, {
         method: 'PATCH',
@@ -210,7 +238,7 @@ export default function TeacherPage() {
         body: JSON.stringify({ status: 'pass' }),
       });
       if (res.ok) {
-        setMessage('Зачёт поставлен');
+        setMessage(currentStatus === 'fail' ? 'Зачёт проставлен принудительно' : 'Зачёт поставлен');
         setTimeout(() => setMessage(''), 3000);
         fetchData();
         fetchToday();
@@ -293,6 +321,14 @@ export default function TeacherPage() {
               Студент
             </Link>
             <span className="bg-white/30 px-4 py-2 rounded-lg text-sm font-medium">Преподаватель</span>
+            <Link href="/report" className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition">
+              Итоговый отчет
+            </Link>
+            <button onClick={handleLogout}
+              className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition"
+              title="Выйти (удалить сохранённый вход)">
+              Выйти
+            </button>
           </nav>
         </div>
         <div className="border-t border-white/10 print:hidden">
@@ -342,6 +378,9 @@ export default function TeacherPage() {
             </button>
           </div>
         </div>
+
+        {/* Итоговый отчёт */}
+        <ReportSection message={message} setMessage={setMessage} />
 
         {/* Статистика */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6 print:hidden">
@@ -424,10 +463,15 @@ export default function TeacherPage() {
                                         {new Date(a.created_at).toLocaleString('ru-RU')}
                                       </span>
                                       <StatusChip status={a.status} />
-                                      {a.status === 'pending' && (
+                                      {a.status !== 'pass' && (
                                         <button
-                                          onClick={(e) => { e.stopPropagation(); handleApprove(a.id); }}
-                                          className="px-3 py-1 text-xs font-semibold bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition">
+                                          onClick={(e) => { e.stopPropagation(); handleApprove(a.id, a.status); }}
+                                          className={`px-3 py-1 text-xs font-semibold text-white rounded-md transition ${
+                                            a.status === 'fail'
+                                              ? 'bg-orange-600 hover:bg-orange-700'
+                                              : 'bg-emerald-600 hover:bg-emerald-700'
+                                          }`}
+                                          title={a.status === 'fail' ? 'Принудительно перезаписать незачёт' : 'Поставить зачёт'}>
                                           Поставить зачёт
                                         </button>
                                       )}
@@ -520,7 +564,31 @@ export default function TeacherPage() {
 }
 
 // ============ МОДАЛЬНОЕ ОКНО ДЕТАЛЕЙ ============
-function AttemptDetailModal({ attempt, onClose, onApprove }: { attempt: AttemptDetail; onClose: () => void; onApprove: (id: number) => void }) {
+function AttemptDetailModal({ attempt, onClose, onApprove }: { attempt: AttemptDetail; onClose: () => void; onApprove: (id: number, currentStatus?: string) => void }) {
+  const [reviewText, setReviewText] = useState(attempt.teacher_review || '');
+  const [techText, setTechText] = useState(attempt.tech_comment || '');
+  const [savingReview, setSavingReview] = useState(false);
+  const [savingTech, setSavingTech] = useState(false);
+  const [reviewSaved, setReviewSaved] = useState(false);
+  const [techSaved, setTechSaved] = useState(false);
+
+  const saveField = async (field: 'teacher_review' | 'tech_comment') => {
+    const isTech = field === 'tech_comment';
+    isTech ? setSavingTech(true) : setSavingReview(true);
+    try {
+      const res = await fetch(`/api/attempts?id=${attempt.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: isTech ? techText : reviewText }),
+      });
+      if (res.ok) {
+        if (isTech) { setTechSaved(true); setTimeout(() => setTechSaved(false), 3000); }
+        else { setReviewSaved(true); setTimeout(() => setReviewSaved(false), 3000); }
+      }
+    } catch {}
+    isTech ? setSavingTech(false) : setSavingReview(false);
+  };
+
   const results = attempt.results || [];
   const passed = results.filter(r => r.passed === true).length;
   const failed = results.filter(r => r.passed === false).length;
@@ -564,9 +632,14 @@ function AttemptDetailModal({ attempt, onClose, onApprove }: { attempt: AttemptD
             }`}>
               {attempt.status === 'pass' ? '✓ ЗАЧЁТ' : attempt.status === 'pending' ? '⊘ ОЖИДАЕТ ПРОВЕРКУ' : '✗ НЕЗАЧЁТ'}
             </div>
-            {attempt.status === 'pending' && (
-              <button onClick={() => onApprove(attempt.id)}
-                className="px-4 py-2.5 rounded-lg text-sm font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition">
+            {attempt.status !== 'pass' && (
+              <button onClick={() => onApprove(attempt.id, attempt.status)}
+                className={`px-4 py-2.5 rounded-lg text-sm font-bold text-white transition ${
+                  attempt.status === 'fail'
+                    ? 'bg-orange-600 hover:bg-orange-700'
+                    : 'bg-emerald-600 hover:bg-emerald-700'
+                }`}
+                title={attempt.status === 'fail' ? 'Принудительно перезаписать незачёт' : 'Поставить зачёт'}>
                 Поставить зачёт
               </button>
             )}
@@ -607,12 +680,52 @@ function AttemptDetailModal({ attempt, onClose, onApprove }: { attempt: AttemptD
       {/* Отзыв студента */}
       {attempt.feedback && (
         <div className="px-7 pb-4">
-          <h3 className="text-sm font-semibold text-blue-800 mb-2">Отзыв студента</h3>
+          <h3 className="text-sm font-semibold text-blue-800 mb-2">Комментарий студента</h3>
           <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-slate-700">
             {attempt.feedback}
           </div>
         </div>
       )}
+
+      {/* Отзыв преподавателя на работу */}
+      <div className="px-7 pb-4">
+        <h3 className="text-sm font-semibold text-blue-800 mb-2">Отзыв преподавателя на работу</h3>
+        <p className="text-xs text-slate-400 mb-2">Этот отзыв будет виден студенту в итоговом отчёте</p>
+        <textarea
+          value={reviewText}
+          onChange={e => setReviewText(e.target.value)}
+          rows={3}
+          placeholder="Напишите отзыв на работу студента..."
+          className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 resize-y"
+        />
+        <div className="flex items-center gap-3 mt-2">
+          <button onClick={() => saveField('teacher_review')} disabled={savingReview}
+            className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:bg-slate-300 transition">
+            {savingReview ? 'Сохранение...' : 'Сохранить отзыв'}
+          </button>
+          {reviewSaved && <span className="text-xs text-emerald-600 font-medium">Сохранено</span>}
+        </div>
+      </div>
+
+      {/* Технический комментарий */}
+      <div className="px-7 pb-4">
+        <h3 className="text-sm font-semibold text-slate-500 mb-2">Технический комментарий</h3>
+        <p className="text-xs text-slate-400 mb-2">Виден только вам, не включается в отчёт для студента</p>
+        <textarea
+          value={techText}
+          onChange={e => setTechText(e.target.value)}
+          rows={2}
+          placeholder="Заметки для себя..."
+          className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100 resize-y"
+        />
+        <div className="flex items-center gap-3 mt-2">
+          <button onClick={() => saveField('tech_comment')} disabled={savingTech}
+            className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-slate-500 text-white hover:bg-slate-600 disabled:bg-slate-300 transition">
+            {savingTech ? 'Сохранение...' : 'Сохранить комментарий'}
+          </button>
+          {techSaved && <span className="text-xs text-emerald-600 font-medium">Сохранено</span>}
+        </div>
+      </div>
 
       <div className="p-5 border-t border-slate-200 flex justify-end gap-3">
         {attempt.file_path && (
@@ -627,6 +740,62 @@ function AttemptDetailModal({ attempt, onClose, onApprove }: { attempt: AttemptD
         </button>
       </div>
     </>
+  );
+}
+
+// ============ СЕКЦИЯ «СОЗДАТЬ ОТЧЁТ» ============
+function ReportSection({ message, setMessage }: { message: string; setMessage: (m: string) => void }) {
+  const [creating, setCreating] = useState(false);
+  const [reportDate, setReportDate] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/report?student=__check_status__')
+      .then(() => {})
+      .catch(() => {});
+    // Загружаем дату последнего создания отчёта через settings
+    fetch('/api/students')
+      .then(r => r.json())
+      .then(json => {
+        // report_generated_at хранится в settings, но не возвращается через /api/students
+        // Используем отдельный запрос
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleCreate = async () => {
+    setCreating(true);
+    try {
+      const res = await fetch('/api/report', { method: 'POST' });
+      const json = await res.json();
+      if (res.ok) {
+        setReportDate(json.generatedAt);
+        setMessage('Итоговый отчёт создан / обновлён');
+        setTimeout(() => setMessage(''), 3000);
+      }
+    } catch {
+      setMessage('Ошибка создания отчёта');
+    }
+    setCreating(false);
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6 print:hidden">
+      <h2 className="text-lg font-bold text-blue-800 mb-1">Итоговый отчёт</h2>
+      <p className="text-xs text-slate-500 mb-4">
+        После создания отчёта студенты смогут увидеть свои результаты на вкладке «Итоговый отчет»
+      </p>
+      <div className="flex items-center gap-4">
+        <button onClick={handleCreate} disabled={creating}
+          className="px-5 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:bg-slate-300 transition">
+          {creating ? 'Создание...' : 'Создать отчёт'}
+        </button>
+        {reportDate && (
+          <span className="text-xs text-slate-500">
+            Последнее обновление: {new Date(reportDate).toLocaleString('ru-RU')}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 

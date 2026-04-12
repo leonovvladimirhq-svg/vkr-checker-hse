@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import Link from 'next/link';
+import { saveAuth, readAuth, clearAuth } from '@/lib/authCache';
 
 // Типы
 interface CheckResultItem {
@@ -70,13 +71,28 @@ export default function StudentPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
 
+  // Восстановление авторизации из localStorage при первом рендере (TTL 24 часа)
+  useEffect(() => {
+    if (readAuth('student')) {
+      setAuthenticated(true);
+    }
+  }, []);
+
   const handleLogin = () => {
     if (loginInput === 'student' && passwordInput === 'hse2025') {
       setAuthenticated(true);
       setLoginError('');
+      saveAuth('student');
     } else {
       setLoginError('Неверный логин или пароль');
     }
+  };
+
+  const handleLogout = () => {
+    clearAuth('student');
+    setAuthenticated(false);
+    setLoginInput('');
+    setPasswordInput('');
   };
 
   // Валидация формы
@@ -261,6 +277,11 @@ export default function StudentPage() {
             </button>
           </div>
         </div>
+        <footer className="max-w-3xl mx-auto px-6 py-4 text-center">
+          <p className="text-xs text-slate-400">
+            Продолжая работу с приложением, вы подтверждаете своё согласие на обработку персональных данных
+          </p>
+        </footer>
       </div>
     );
   }
@@ -279,7 +300,7 @@ export default function StudentPage() {
 
     return (
       <div className="min-h-screen bg-slate-50">
-        <Header />
+        <Header onLogout={handleLogout} />
         <main className="max-w-3xl mx-auto px-6 py-8">
           <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 mb-4 text-sm text-amber-800 print:hidden">
             Несогласны с результатами анализа? Напишите нам{' '}
@@ -337,11 +358,11 @@ export default function StudentPage() {
 
             {/* Отзыв студента */}
             <div className="mt-6 mb-2 print:hidden">
-              <label className="block text-sm font-semibold mb-1.5">Отзыв (необязательно)</label>
+              <label className="block text-sm font-semibold mb-1.5">Комментарий для преподавателя</label>
               <textarea
                 value={feedback}
                 onChange={e => setFeedback(e.target.value)}
-                placeholder="Оставьте комментарий или отзыв о процессе проверки..."
+                placeholder="Оставьте комментарий для преподавателя (необязательно)"
                 rows={3}
                 className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 resize-y"
               />
@@ -369,6 +390,11 @@ export default function StudentPage() {
             </div>
           </div>
         </main>
+        <footer className="max-w-3xl mx-auto px-6 py-4 text-center">
+          <p className="text-xs text-slate-400">
+            Продолжая работу с приложением, вы подтверждаете своё согласие на обработку персональных данных
+          </p>
+        </footer>
       </div>
     );
   }
@@ -376,7 +402,7 @@ export default function StudentPage() {
   // ============ ФОРМА ============
   return (
     <div className="min-h-screen bg-slate-50">
-      <Header />
+      <Header onLogout={handleLogout} />
 
       {/* Оверлей загрузки */}
       {loading && (
@@ -543,12 +569,17 @@ export default function StudentPage() {
           </div>
         </div>
       </main>
+      <footer className="max-w-3xl mx-auto px-6 py-4 text-center">
+        <p className="text-xs text-slate-400">
+          Продолжая работу с приложением, вы подтверждаете своё согласие на обработку персональных данных
+        </p>
+      </footer>
     </div>
   );
 }
 
 // ============ HEADER ============
-function Header() {
+function Header({ onLogout }: { onLogout?: () => void }) {
   return (
     <header className="bg-gradient-to-r from-slate-800 to-blue-700 text-white shadow-lg print:shadow-none">
       <div className="max-w-3xl mx-auto px-6 py-5 flex justify-between items-center">
@@ -561,6 +592,16 @@ function Header() {
           <Link href="/teacher" className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition">
             Преподаватель
           </Link>
+          <Link href="/report" className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition">
+            Итоговый отчет
+          </Link>
+          {onLogout && (
+            <button onClick={onLogout}
+              className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition"
+              title="Выйти (удалить сохранённый вход)">
+              Выйти
+            </button>
+          )}
         </nav>
       </div>
       <div className="border-t border-white/10 print:hidden">

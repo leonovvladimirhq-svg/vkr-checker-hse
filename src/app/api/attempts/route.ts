@@ -3,7 +3,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getAttemptById, getAttemptsByStudent, deleteAttempt, getAttemptCount, insertAttempt, updateAttemptStatus } from '@/lib/db';
+import { getAttemptById, getAttemptsByStudent, deleteAttempt, getAttemptCount, insertAttempt, updateAttemptStatus, updateAttemptFields } from '@/lib/db';
 import path from 'path';
 import fs from 'fs';
 
@@ -105,17 +105,27 @@ export async function PATCH(req: NextRequest) {
   try {
     const id = req.nextUrl.searchParams.get('id');
     const body = await req.json();
-    const { status } = body;
+    const { status, teacher_review, tech_comment } = body;
 
-    if (!id || !status) {
-      return NextResponse.json({ error: 'Укажите id и status' }, { status: 400 });
+    if (!id) {
+      return NextResponse.json({ error: 'Укажите id' }, { status: 400 });
     }
 
-    if (!['pass', 'fail', 'pending'].includes(status)) {
+    // Хотя бы одно поле должно быть передано
+    if (status === undefined && teacher_review === undefined && tech_comment === undefined) {
+      return NextResponse.json({ error: 'Укажите хотя бы одно поле для обновления' }, { status: 400 });
+    }
+
+    if (status !== undefined && !['pass', 'fail', 'pending'].includes(status)) {
       return NextResponse.json({ error: 'Недопустимый статус' }, { status: 400 });
     }
 
-    const updated = updateAttemptStatus(Number(id), status);
+    const fields: { status?: string; teacher_review?: string; tech_comment?: string } = {};
+    if (status !== undefined) fields.status = status;
+    if (teacher_review !== undefined) fields.teacher_review = teacher_review;
+    if (tech_comment !== undefined) fields.tech_comment = tech_comment;
+
+    const updated = updateAttemptFields(Number(id), fields);
     if (!updated) {
       return NextResponse.json({ error: 'Попытка не найдена' }, { status: 404 });
     }
