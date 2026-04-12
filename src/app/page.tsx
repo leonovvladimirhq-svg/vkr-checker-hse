@@ -324,6 +324,9 @@ export default function StudentPage() {
                 {result.status === 'pass' ? '✓ ЗАЧЁТ' : result.status === 'pending' ? '⊘ ОЖИДАЙТЕ ПРОВЕРКУ ПРЕПОДАВАТЕЛЕМ' : '✗ НЕЗАЧЁТ'}
               </div>
             </div>
+            <p className="text-xs text-slate-500 italic mt-2 text-right">
+              *Предварительный результат, итог — после проверки преподавателем
+            </p>
 
             {/* Информация о документе */}
             <div className="bg-slate-50 rounded-lg p-3 mb-4 text-xs text-slate-600">

@@ -256,6 +256,36 @@ export default function TeacherPage() {
     }
   };
 
+  // Поставить незачёт (принудительно для зачтённых работ)
+  const handleReject = async (attemptId: number) => {
+    const ok = window.confirm(
+      'Вы действительно хотите принудительно поставить НЕЗАЧЁТ работе со статусом «Зачёт»?\n\n' +
+      'Это перезапишет текущую оценку.'
+    );
+    if (!ok) return;
+    try {
+      const res = await fetch(`/api/attempts?id=${attemptId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'fail' }),
+      });
+      if (res.ok) {
+        setMessage('Незачёт проставлен принудительно');
+        setTimeout(() => setMessage(''), 3000);
+        fetchData();
+        fetchToday();
+        if (expandedStudent) {
+          setStudentAttempts(prev => prev.map(a => a.id === attemptId ? { ...a, status: 'fail' } : a));
+        }
+        if (selectedAttempt && selectedAttempt.id === attemptId) {
+          setSelectedAttempt({ ...selectedAttempt, status: 'fail' });
+        }
+      }
+    } catch {
+      setMessage('Ошибка обновления статуса');
+    }
+  };
+
   // Выгрузка в Excel
   const exportExcel = async () => {
     if (!data?.students?.length) return;
@@ -475,6 +505,14 @@ export default function TeacherPage() {
                                           Поставить зачёт
                                         </button>
                                       )}
+                                      {a.status === 'pass' && (
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); handleReject(a.id); }}
+                                          className="px-3 py-1 text-xs font-semibold text-white rounded-md transition bg-red-600 hover:bg-red-700"
+                                          title="Принудительно поставить незачёт">
+                                          Поставить незачёт
+                                        </button>
+                                      )}
                                       <button
                                         onClick={(e) => { e.stopPropagation(); openDetail(a.id); }}
                                         className="px-3 py-1 text-xs font-semibold bg-blue-600 text-white rounded-md hover:bg-blue-700 transition">
@@ -554,7 +592,7 @@ export default function TeacherPage() {
                 <p className="text-sm text-slate-500">Загрузка...</p>
               </div>
             ) : selectedAttempt && (
-              <AttemptDetailModal attempt={selectedAttempt} onClose={() => setSelectedAttempt(null)} onApprove={handleApprove} />
+              <AttemptDetailModal attempt={selectedAttempt} onClose={() => setSelectedAttempt(null)} onApprove={handleApprove} onReject={handleReject} />
             )}
           </div>
         </div>
@@ -564,7 +602,7 @@ export default function TeacherPage() {
 }
 
 // ============ МОДАЛЬНОЕ ОКНО ДЕТАЛЕЙ ============
-function AttemptDetailModal({ attempt, onClose, onApprove }: { attempt: AttemptDetail; onClose: () => void; onApprove: (id: number, currentStatus?: string) => void }) {
+function AttemptDetailModal({ attempt, onClose, onApprove, onReject }: { attempt: AttemptDetail; onClose: () => void; onApprove: (id: number, currentStatus?: string) => void; onReject: (id: number) => void }) {
   const [reviewText, setReviewText] = useState(attempt.teacher_review || '');
   const [techText, setTechText] = useState(attempt.tech_comment || '');
   const [savingReview, setSavingReview] = useState(false);
@@ -641,6 +679,13 @@ function AttemptDetailModal({ attempt, onClose, onApprove }: { attempt: AttemptD
                 }`}
                 title={attempt.status === 'fail' ? 'Принудительно перезаписать незачёт' : 'Поставить зачёт'}>
                 Поставить зачёт
+              </button>
+            )}
+            {attempt.status === 'pass' && (
+              <button onClick={() => onReject(attempt.id)}
+                className="px-4 py-2.5 rounded-lg text-sm font-bold text-white transition bg-red-600 hover:bg-red-700"
+                title="Принудительно поставить незачёт">
+                Поставить незачёт
               </button>
             )}
             <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
