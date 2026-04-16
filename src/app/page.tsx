@@ -360,7 +360,7 @@ export default function StudentPage() {
               <textarea
                 value={feedback}
                 onChange={e => setFeedback(e.target.value)}
-                placeholder="Оставьте комментарий для преподавателя (необязательно)"
+                placeholder="Оставьте комментарий для преподавателя о вашей работе или выразите несогласие с результатами оценивания (необязательно)"
                 rows={3}
                 className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 resize-y"
               />
