@@ -23,6 +23,8 @@ const API_BASE = 'https://cloud-api.yandex.net/v1/disk/public/resources';
 const TIMEOUT_MS = 15000;
 
 const MAX_DEPTH = 5;
+const MAX_FILES = 300;          // Лимит файлов — останавливаем обход
+const GLOBAL_TIMEOUT_MS = 60000; // 60 сек на весь рекурсивный обход
 
 /**
  * Рекурсивный обход папки на Яндекс.Диске с пагинацией
@@ -32,8 +34,12 @@ async function fetchFolderRecursive(
   folderPath: string,
   prefix: string,
   depth: number = 0,
+  deadline: number = Date.now() + GLOBAL_TIMEOUT_MS,
+  allFiles: YaDiskFileInfo[] = [],
 ): Promise<YaDiskFileInfo[]> {
   if (depth > MAX_DEPTH) return [];
+  if (Date.now() >= deadline) return [];       // общий таймаут истёк
+  if (allFiles.length >= MAX_FILES) return []; // достигнут лимит файлов
 
   const files: YaDiskFileInfo[] = [];
   let offset = 0;
@@ -41,6 +47,10 @@ async function fetchFolderRecursive(
 
   // Пагинация — получаем ВСЕ элементы в папке
   while (true) {
+    // Проверяем таймаут и лимит перед каждым запросом
+    if (Date.now() >= deadline) break;
+    if (allFiles.length >= MAX_FILES) break;
+
     try {
       let url = `${API_BASE}?public_key=${encodeURIComponent(publicUrl)}&limit=${limit}&offset=${offset}`;
       if (folderPath) {
@@ -58,20 +68,25 @@ async function fetchFolderRecursive(
       const items = data._embedded?.items || [];
 
       for (const item of items) {
+        if (allFiles.length >= MAX_FILES) break; // лимит достигнут внутри страницы
         if (item.type === 'file') {
-          files.push({
+          const fileInfo: YaDiskFileInfo = {
             name: prefix ? `${prefix}/${item.name}` : item.name,
             size: item.size || 0,
             type: 'file',
             mime_type: item.mime_type,
             path: item.path,
-          });
+          };
+          files.push(fileInfo);
+          allFiles.push(fileInfo);
         } else if (item.type === 'dir') {
           // Рекурсивно обходим подпапку
           const subPrefix = prefix ? `${prefix}/${item.name}` : item.name;
           const subPath = folderPath ? `${folderPath}/${item.name}` : `/${item.name}`;
           try {
-            const subFiles = await fetchFolderRecursive(publicUrl, subPath, subPrefix, depth + 1);
+            const subFiles = await fetchFolderRecursive(
+              publicUrl, subPath, subPrefix, depth + 1, deadline, allFiles,
+            );
             files.push(...subFiles);
           } catch {
             // Не удалось обойти подпапку — пропускаем
@@ -116,7 +131,8 @@ export async function getPublicResourceInfo(publicUrl: string): Promise<YaDiskFo
 
     // Если это папка — рекурсивно обходим все подпапки
     if (data.type === 'dir') {
-      const files = await fetchFolderRecursive(publicUrl, '', '', 0);
+      const deadline = Date.now() + GLOBAL_TIMEOUT_MS;
+      const files = await fetchFolderRecursive(publicUrl, '', '', 0, deadline, []);
 
       return {
         name: data.name,

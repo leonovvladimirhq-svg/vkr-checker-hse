@@ -302,11 +302,6 @@ export default function StudentPage() {
       <div className="min-h-screen bg-slate-50">
         <Header onLogout={handleLogout} />
         <main className="max-w-3xl mx-auto px-6 py-8">
-          <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 mb-4 text-sm text-amber-800 print:hidden">
-            Несогласны с результатами анализа? Напишите нам{' '}
-            <a href="mailto:example@hse.ru" className="font-semibold underline">example@hse.ru</a>
-          </div>
-
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7">
             {/* Заголовок и бейдж */}
             <div className="flex justify-between items-start flex-wrap gap-4 mb-4">
