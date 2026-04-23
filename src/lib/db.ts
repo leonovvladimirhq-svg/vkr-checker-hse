@@ -157,7 +157,7 @@ export interface AttemptRow {
 export function getAttemptCount(studentName: string): number {
   const db = getDb();
   const row = db.prepare(
-    'SELECT COUNT(*) as cnt FROM attempts WHERE student_name = ?'
+    'SELECT COUNT(*) as cnt FROM attempts WHERE TRIM(student_name) = TRIM(?)'
   ).get(studentName) as { cnt: number };
   return row.cnt;
 }
@@ -165,7 +165,7 @@ export function getAttemptCount(studentName: string): number {
 export function getLastAttempt(studentName: string): AttemptRow | undefined {
   const db = getDb();
   return db.prepare(
-    'SELECT * FROM attempts WHERE student_name = ? ORDER BY created_at DESC LIMIT 1'
+    'SELECT * FROM attempts WHERE TRIM(student_name) = TRIM(?) ORDER BY created_at DESC LIMIT 1'
   ).get(studentName) as AttemptRow | undefined;
 }
 
@@ -224,7 +224,7 @@ export function getAllStudentsSummary(): Array<{
     SELECT id, student_name, work_type, status, attempt_number, created_at as last_date, wave
     FROM attempts
     WHERE id IN (
-      SELECT MAX(id) FROM attempts GROUP BY student_name
+      SELECT MAX(id) FROM attempts GROUP BY TRIM(student_name)
     )
     ORDER BY created_at DESC
   `).all() as any[];
@@ -247,7 +247,7 @@ export function getAttemptById(id: number): AttemptRow | undefined {
 export function getAttemptsByStudent(studentName: string): AttemptRow[] {
   const db = getDb();
   return db.prepare(
-    'SELECT * FROM attempts WHERE student_name = ? ORDER BY created_at DESC'
+    'SELECT * FROM attempts WHERE TRIM(student_name) = TRIM(?) ORDER BY created_at DESC'
   ).all(studentName) as AttemptRow[];
 }
 

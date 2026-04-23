@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
-    const studentName = formData.get('studentName') as string;
+    const studentName = (formData.get('studentName') as string)?.trim();
     const workType = formData.get('workType') as string;
     const status = formData.get('status') as string;
     const resultsJson = formData.get('resultsJson') as string;

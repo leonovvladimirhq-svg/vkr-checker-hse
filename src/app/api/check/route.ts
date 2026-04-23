@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData();
 
     // --- Извлечение полей ---
-    const studentName = formData.get('studentName') as string;
+    const studentName = (formData.get('studentName') as string)?.trim();
     const workType = formData.get('workType') as WorkType;
     const usesAI = formData.get('usesAI') === 'true';
     const dbLink = formData.get('dbLink') as string || '';
