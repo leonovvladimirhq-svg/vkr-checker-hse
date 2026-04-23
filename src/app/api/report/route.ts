@@ -1,11 +1,18 @@
 // ============================================================
-// GET/POST /api/report — Итоговый отчёт для студентов
-// GET ?student=ФИО — проверить статус и получить результат
-// POST — создать/обновить отчёт (преподаватель)
+// GET/POST/DELETE /api/report — Итоговый отчёт для студентов
+// GET ?student=ФИО — проверить статус загрузки + получить результат
+// POST — опубликовать отчёт (снапшот IDs + timestamp)
+// DELETE — закрыть отчёт
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getSetting, setSetting, getLastAttempt } from '@/lib/db';
+import {
+  getSetting,
+  setSetting,
+  getAllStudentsSummary,
+  getStudentSubmissionStatus,
+  getAttemptByIdIfInSnapshot,
+} from '@/lib/db';
 
 export async function GET(req: NextRequest) {
   try {
@@ -16,15 +23,32 @@ export async function GET(req: NextRequest) {
     }
 
     const reportGeneratedAt = getSetting('report_generated_at');
+    const reportReady = !!reportGeneratedAt;
 
-    if (!reportGeneratedAt) {
-      return NextResponse.json({ reportReady: false });
+    // Всегда возвращаем статус загрузки (есть ли работа в БД вообще)
+    const submissionStatus = getStudentSubmissionStatus(studentName);
+
+    if (!reportReady) {
+      return NextResponse.json({ reportReady: false, submissionStatus });
     }
 
-    const attempt = getLastAttempt(studentName);
+    // Отчёт опубликован — ищем студента только в снапшоте
+    let snapshotIds: number[] = [];
+    try {
+      snapshotIds = JSON.parse(getSetting('report_snapshot_ids') || '[]');
+    } catch {
+      snapshotIds = [];
+    }
+
+    const attempt = getAttemptByIdIfInSnapshot(studentName, snapshotIds);
 
     if (!attempt) {
-      return NextResponse.json({ reportReady: true, studentFound: false });
+      return NextResponse.json({
+        reportReady: true,
+        studentFound: false,
+        submissionStatus,
+        reportGeneratedAt,
+      });
     }
 
     // Возвращаем данные БЕЗ tech_comment — он только для преподавателя
@@ -39,6 +63,7 @@ export async function GET(req: NextRequest) {
       reportReady: true,
       studentFound: true,
       reportGeneratedAt,
+      submissionStatus,
       attempt: {
         id: attempt.id,
         student_name: attempt.student_name,
@@ -64,9 +89,16 @@ export async function POST(req: NextRequest) {
     if (body.password !== REPORT_PASSWORD) {
       return NextResponse.json({ error: 'Неверный пароль' }, { status: 401 });
     }
+
     const generatedAt = new Date().toISOString();
     setSetting('report_generated_at', generatedAt);
-    return NextResponse.json({ ok: true, generatedAt });
+
+    // Снапшот: сохранить IDs последних попыток всех студентов на момент публикации
+    const summary = getAllStudentsSummary();
+    const snapshotIds = summary.map((s) => s.id);
+    setSetting('report_snapshot_ids', JSON.stringify(snapshotIds));
+
+    return NextResponse.json({ ok: true, generatedAt, snapshotCount: snapshotIds.length });
   } catch (error: any) {
     console.error('Report POST error:', error);
     return NextResponse.json({ error: error.message || 'Ошибка создания отчёта' }, { status: 500 });
@@ -80,6 +112,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Неверный пароль' }, { status: 401 });
     }
     setSetting('report_generated_at', '');
+    setSetting('report_snapshot_ids', '[]');
     return NextResponse.json({ ok: true });
   } catch (error: any) {
     console.error('Report DELETE error:', error);

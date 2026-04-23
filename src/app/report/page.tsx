@@ -22,10 +22,18 @@ interface ReportAttempt {
   created_at: string;
 }
 
+interface SubmissionStatus {
+  found: boolean;
+  created_at?: string;
+  attempt_number?: number;
+  attempt_id?: number;
+}
+
 interface ReportData {
   reportReady: boolean;
   studentFound?: boolean;
   reportGeneratedAt?: string;
+  submissionStatus?: SubmissionStatus;
   attempt?: ReportAttempt;
 }
 
@@ -65,7 +73,7 @@ export default function ReportPage() {
         <div className="max-w-3xl mx-auto px-6 py-5 flex justify-between items-center">
           <div>
             <h1 className="text-xl font-bold">Проверка ВКР</h1>
-            <p className="text-xs opacity-75 mt-0.5">Итоговый отчёт</p>
+            <p className="text-xs opacity-75 mt-0.5">Итоговый отчёт / Статус работы</p>
           </div>
           <nav className="flex gap-1">
             <Link href="/" className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition">
@@ -74,7 +82,7 @@ export default function ReportPage() {
             <Link href="/teacher" className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition">
               Преподаватель
             </Link>
-            <span className="bg-white/30 px-4 py-2 rounded-lg text-sm font-medium">Итоговый отчет</span>
+            <span className="bg-white/30 px-4 py-2 rounded-lg text-sm font-medium">Итоговый отчет/Статус работы</span>
           </nav>
         </div>
         <div className="border-t border-white/10">
@@ -88,8 +96,10 @@ export default function ReportPage() {
       <main className="max-w-3xl mx-auto px-6 py-8">
         {/* Форма поиска */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6">
-          <h2 className="text-lg font-bold text-blue-800 mb-1">Итоговый отчёт по проверке ВКР</h2>
-          <p className="text-xs text-slate-500 mb-5">Введите ФИО для просмотра результатов проверки</p>
+          <h2 className="text-lg font-bold text-blue-800 mb-1">Итоговый отчёт / Статус работы</h2>
+          <p className="text-xs text-slate-500 mb-5">
+            Введите ФИО, чтобы узнать статус загрузки работы и результаты проверки
+          </p>
 
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 mb-4 text-sm">
@@ -116,29 +126,72 @@ export default function ReportPage() {
           </div>
         </div>
 
-        {/* Результат: отчёт не сформирован */}
+        {/* Карточка статуса загрузки — всегда, если есть данные */}
+        {data && data.submissionStatus && (
+          <div className={`rounded-xl border px-6 py-4 mb-4 flex items-center gap-4 ${
+            data.submissionStatus.found
+              ? 'bg-emerald-50 border-emerald-200'
+              : 'bg-red-50 border-red-200'
+          }`}>
+            <span className="text-2xl flex-shrink-0">
+              {data.submissionStatus.found ? '✅' : '❌'}
+            </span>
+            <div>
+              {data.submissionStatus.found ? (
+                <>
+                  <p className="font-semibold text-emerald-800 text-sm">Работа загружена в систему</p>
+                  <p className="text-xs text-emerald-700 mt-0.5">
+                    {new Date(data.submissionStatus.created_at!).toLocaleString('ru-RU', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                    {' '}· Попытка {data.submissionStatus.attempt_number}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="font-semibold text-red-800 text-sm">Работа не найдена в системе</p>
+                  <p className="text-xs text-red-700 mt-0.5">
+                    Проверьте написание ФИО или обратитесь к преподавателю
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Отчёт не опубликован */}
         {data && !data.reportReady && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl px-6 py-5 text-center">
-            <div className="text-3xl mb-3">&#8987;</div>
-            <h3 className="text-lg font-bold text-amber-800 mb-2">Работа ещё на проверке преподавателем</h3>
+            <div className="text-3xl mb-3">⏳</div>
+            <h3 className="text-lg font-bold text-amber-800 mb-2">Итоговый отчёт ещё не опубликован</h3>
             <p className="text-sm text-amber-700">
-              Итоговый отчёт ещё не сформирован. Пожалуйста, дождитесь завершения проверки.
+              Преподаватель ещё не завершил проверку. Статус загрузки вашей работы показан выше.
             </p>
           </div>
         )}
 
-        {/* Результат: студент не найден */}
+        {/* Студент не найден в снапшоте отчёта */}
         {data && data.reportReady && data.studentFound === false && (
-          <div className="bg-red-50 border border-red-200 rounded-xl px-6 py-5 text-center">
-            <div className="text-3xl mb-3">&#10060;</div>
-            <h3 className="text-lg font-bold text-red-800 mb-2">Студент не найден</h3>
-            <p className="text-sm text-red-700">
-              Проверьте правильность написания ФИО. Оно должно совпадать с тем, которое было указано при загрузке работы.
+          <div className="bg-slate-50 border border-slate-200 rounded-xl px-6 py-5 text-center">
+            <div className="text-3xl mb-3">📋</div>
+            <h3 className="text-lg font-bold text-slate-700 mb-2">
+              {data.submissionStatus?.found
+                ? 'Ваша работа не включена в текущий отчёт'
+                : 'Студент не найден в отчёте'}
+            </h3>
+            <p className="text-sm text-slate-600">
+              {data.submissionStatus?.found
+                ? 'Возможно, работа была загружена после публикации отчёта. Обратитесь к преподавателю.'
+                : 'Проверьте правильность написания ФИО.'}
             </p>
           </div>
         )}
 
-        {/* Результат: данные найдены */}
+        {/* Полные результаты */}
         {data && data.reportReady && data.studentFound && data.attempt && (
           <ReportResult attempt={data.attempt} />
         )}

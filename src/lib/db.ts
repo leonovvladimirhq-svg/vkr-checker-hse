@@ -244,6 +244,37 @@ export function getAttemptById(id: number): AttemptRow | undefined {
   return db.prepare('SELECT * FROM attempts WHERE id = ?').get(id) as AttemptRow | undefined;
 }
 
+// Статус загрузки работы (для страницы отчёта, работает до публикации отчёта)
+export function getStudentSubmissionStatus(studentName: string): {
+  found: boolean;
+  created_at?: string;
+  attempt_number?: number;
+  attempt_id?: number;
+} {
+  const db = getDb();
+  const row = db.prepare(
+    'SELECT id, created_at, attempt_number FROM attempts WHERE TRIM(student_name) = TRIM(?) ORDER BY created_at DESC LIMIT 1'
+  ).get(studentName) as { id: number; created_at: string; attempt_number: number } | undefined;
+
+  if (!row) return { found: false };
+  return {
+    found: true,
+    created_at: row.created_at,
+    attempt_number: row.attempt_number,
+    attempt_id: row.id,
+  };
+}
+
+// Получить последнюю попытку студента, чей id входит в снапшот
+export function getAttemptByIdIfInSnapshot(studentName: string, snapshotIds: number[]): AttemptRow | undefined {
+  if (snapshotIds.length === 0) return undefined;
+  const db = getDb();
+  const placeholders = snapshotIds.map(() => '?').join(',');
+  return db.prepare(
+    `SELECT * FROM attempts WHERE TRIM(student_name) = TRIM(?) AND id IN (${placeholders}) ORDER BY created_at DESC LIMIT 1`
+  ).get(studentName, ...snapshotIds) as AttemptRow | undefined;
+}
+
 export function getAttemptsByStudent(studentName: string): AttemptRow[] {
   const db = getDb();
   return db.prepare(

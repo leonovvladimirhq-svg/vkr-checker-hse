@@ -352,7 +352,7 @@ export default function TeacherPage() {
             </Link>
             <span className="bg-white/30 px-4 py-2 rounded-lg text-sm font-medium">Преподаватель</span>
             <Link href="/report" className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition">
-              Итоговый отчет
+              Итоговый отчет/Статус работы
             </Link>
             <button onClick={handleLogout}
               className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition"
@@ -857,7 +857,7 @@ function ReportSection({ message, setMessage }: { message: string; setMessage: (
         <div>
           <h2 className="text-lg font-bold text-blue-800 mb-1">Итоговый отчёт</h2>
           <p className="text-xs text-slate-500">
-            После публикации студенты смогут увидеть свои результаты на вкладке «Итоговый отчет»
+            После публикации студенты смогут увидеть свои результаты на вкладке «Итоговый отчет/Статус работы»
           </p>
         </div>
         {reportOpen !== null && (
