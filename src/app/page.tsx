@@ -319,9 +319,12 @@ export default function StudentPage() {
                 {result.status === 'pass' ? '✓ ЗАЧЁТ' : result.status === 'pending' ? '⊘ ОЖИДАЙТЕ ПРОВЕРКУ ПРЕПОДАВАТЕЛЕМ' : '✗ НЕЗАЧЁТ'}
               </div>
             </div>
-            <p className="text-xs text-slate-500 italic mt-2 text-right">
-              *Предварительный результат, итог — после проверки преподавателем
-            </p>
+            <div className="bg-amber-50 border-2 border-amber-400 rounded-xl px-5 py-3 mt-3 mb-1 flex items-start gap-3">
+              <span className="text-amber-500 text-xl flex-shrink-0">⚠️</span>
+              <p className="text-sm font-semibold text-amber-800">
+                Предварительный результат — окончательный итог определяет преподаватель после проверки вашей работы
+              </p>
+            </div>
 
             {/* Информация о документе */}
             <div className="bg-slate-50 rounded-lg p-3 mb-4 text-xs text-slate-600">
@@ -365,6 +368,17 @@ export default function StudentPage() {
                 className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 resize-y"
               />
             </div>
+
+            {/* Оверлей сохранения */}
+            {savingResult && (
+              <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+                <div className="bg-white rounded-xl p-10 text-center max-w-sm shadow-xl">
+                  <div className="w-12 h-12 border-4 border-slate-200 border-t-emerald-600 rounded-full animate-spin mx-auto mb-4" />
+                  <div className="font-semibold text-slate-800 mb-2">Сохранение результата...</div>
+                  <div className="text-sm text-red-600 font-medium">Не закрывайте страницу!</div>
+                </div>
+              </div>
+            )}
 
             {/* Ошибка сохранения */}
             {saveError && (

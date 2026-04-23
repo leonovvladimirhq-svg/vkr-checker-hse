@@ -653,13 +653,10 @@ function AttemptDetailModal({ attempt, onClose, onApprove, onReject }: { attempt
             <p className="text-xs text-slate-400 mt-1">
               {new Date(attempt.created_at).toLocaleString('ru-RU')}
               {attempt.file_name && <> &middot; {attempt.file_name}</>}
-              {attempt.file_path && (
-                <> &middot; <a
-                  href={`/api/download?id=${attempt.id}`}
-                  className="text-blue-600 hover:text-blue-800 font-semibold underline"
-                  onClick={e => e.stopPropagation()}
-                >Скачать работу</a></>
-              )}
+              {attempt.file_path
+                ? <> &middot; <a href={`/api/download?id=${attempt.id}`} className="text-blue-600 hover:text-blue-800 font-semibold underline" onClick={e => e.stopPropagation()}>Скачать работу</a></>
+                : <> &middot; <span className="text-amber-600 font-medium">Файл не сохранён</span></>
+              }
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -772,13 +769,16 @@ function AttemptDetailModal({ attempt, onClose, onApprove, onReject }: { attempt
         </div>
       </div>
 
-      <div className="p-5 border-t border-slate-200 flex justify-end gap-3">
-        {attempt.file_path && (
-          <a href={`/api/download?id=${attempt.id}`}
-            className="px-5 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 transition inline-flex items-center gap-1.5">
-            Скачать работу
-          </a>
-        )}
+      <div className="p-5 border-t border-slate-200 flex justify-end gap-3 items-center">
+        {attempt.file_path
+          ? <a href={`/api/download?id=${attempt.id}`}
+              className="px-5 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 transition inline-flex items-center gap-1.5">
+              Скачать работу
+            </a>
+          : <span className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
+              ⚠️ Файл утерян — попросите студента загрузить работу заново
+            </span>
+        }
         <button onClick={onClose}
           className="px-5 py-2 rounded-lg text-sm font-semibold bg-slate-100 hover:bg-slate-200 border border-slate-200">
           Закрыть
@@ -788,55 +788,103 @@ function AttemptDetailModal({ attempt, onClose, onApprove, onReject }: { attempt
   );
 }
 
-// ============ СЕКЦИЯ «СОЗДАТЬ ОТЧЁТ» ============
+// ============ СЕКЦИЯ «СОЗДАТЬ / ЗАКРЫТЬ ОТЧЁТ» ============
+const REPORT_PASSWORD = '1234';
+
 function ReportSection({ message, setMessage }: { message: string; setMessage: (m: string) => void }) {
-  const [creating, setCreating] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [reportOpen, setReportOpen] = useState<boolean | null>(null); // null = загружается
   const [reportDate, setReportDate] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/report?student=__check_status__')
-      .then(() => {})
-      .catch(() => {});
-    // Загружаем дату последнего создания отчёта через settings
-    fetch('/api/students')
+    fetch('/api/report?student=__status__')
       .then(r => r.json())
       .then(json => {
-        // report_generated_at хранится в settings, но не возвращается через /api/students
-        // Используем отдельный запрос
+        setReportOpen(!!json.reportReady);
+        if (json.reportReady) setReportDate(null); // дата не нужна
       })
-      .catch(() => {});
+      .catch(() => setReportOpen(false));
   }, []);
 
   const handleCreate = async () => {
-    setCreating(true);
+    setLoading(true);
     try {
-      const res = await fetch('/api/report', { method: 'POST' });
+      const res = await fetch('/api/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: REPORT_PASSWORD }),
+      });
       const json = await res.json();
       if (res.ok) {
+        setReportOpen(true);
         setReportDate(json.generatedAt);
-        setMessage('Итоговый отчёт создан / обновлён');
-        setTimeout(() => setMessage(''), 3000);
+        setMessage('Итоговый отчёт опубликован — студенты могут видеть результаты');
+        setTimeout(() => setMessage(''), 4000);
+      } else {
+        setMessage('Ошибка: ' + (json.error || 'неизвестная'));
       }
     } catch {
       setMessage('Ошибка создания отчёта');
     }
-    setCreating(false);
+    setLoading(false);
+  };
+
+  const handleClose = async () => {
+    const ok = window.confirm('Закрыть отчёт? Студенты перестанут видеть результаты до следующей публикации.');
+    if (!ok) return;
+    setLoading(true);
+    try {
+      const res = await fetch('/api/report', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: REPORT_PASSWORD }),
+      });
+      if (res.ok) {
+        setReportOpen(false);
+        setReportDate(null);
+        setMessage('Итоговый отчёт закрыт');
+        setTimeout(() => setMessage(''), 3000);
+      }
+    } catch {
+      setMessage('Ошибка закрытия отчёта');
+    }
+    setLoading(false);
   };
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6 print:hidden">
-      <h2 className="text-lg font-bold text-blue-800 mb-1">Итоговый отчёт</h2>
-      <p className="text-xs text-slate-500 mb-4">
-        После создания отчёта студенты смогут увидеть свои результаты на вкладке «Итоговый отчет»
-      </p>
-      <div className="flex items-center gap-4">
-        <button onClick={handleCreate} disabled={creating}
-          className="px-5 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:bg-slate-300 transition">
-          {creating ? 'Создание...' : 'Создать отчёт'}
-        </button>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-bold text-blue-800 mb-1">Итоговый отчёт</h2>
+          <p className="text-xs text-slate-500">
+            После публикации студенты смогут увидеть свои результаты на вкладке «Итоговый отчет»
+          </p>
+        </div>
+        {reportOpen !== null && (
+          <span className={`px-3 py-1 rounded-full text-xs font-semibold flex-shrink-0 ${reportOpen ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+            {reportOpen ? '● Опубликован' : '○ Закрыт'}
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-3 mt-4">
+        {reportOpen === false && (
+          <button onClick={handleCreate} disabled={loading}
+            className="px-5 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:bg-slate-300 transition">
+            {loading ? 'Публикация...' : 'Создать отчёт'}
+          </button>
+        )}
+        {reportOpen === true && (
+          <button onClick={handleClose} disabled={loading}
+            className="px-5 py-2 rounded-lg text-sm font-semibold bg-red-600 text-white hover:bg-red-700 disabled:bg-slate-300 transition">
+            {loading ? 'Закрытие...' : 'Закрыть отчёт'}
+          </button>
+        )}
+        {reportOpen === null && (
+          <span className="text-xs text-slate-400">Загрузка...</span>
+        )}
         {reportDate && (
           <span className="text-xs text-slate-500">
-            Последнее обновление: {new Date(reportDate).toLocaleString('ru-RU')}
+            Опубликован: {new Date(reportDate).toLocaleString('ru-RU')}
           </span>
         )}
       </div>

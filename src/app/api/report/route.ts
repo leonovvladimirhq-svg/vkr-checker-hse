@@ -56,13 +56,33 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function POST() {
+const REPORT_PASSWORD = '1234';
+
+export async function POST(req: NextRequest) {
   try {
+    const body = await req.json().catch(() => ({}));
+    if (body.password !== REPORT_PASSWORD) {
+      return NextResponse.json({ error: 'Неверный пароль' }, { status: 401 });
+    }
     const generatedAt = new Date().toISOString();
     setSetting('report_generated_at', generatedAt);
     return NextResponse.json({ ok: true, generatedAt });
   } catch (error: any) {
     console.error('Report POST error:', error);
     return NextResponse.json({ error: error.message || 'Ошибка создания отчёта' }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const body = await req.json().catch(() => ({}));
+    if (body.password !== REPORT_PASSWORD) {
+      return NextResponse.json({ error: 'Неверный пароль' }, { status: 401 });
+    }
+    setSetting('report_generated_at', '');
+    return NextResponse.json({ ok: true });
+  } catch (error: any) {
+    console.error('Report DELETE error:', error);
+    return NextResponse.json({ error: error.message || 'Ошибка закрытия отчёта' }, { status: 500 });
   }
 }
