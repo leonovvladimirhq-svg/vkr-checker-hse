@@ -148,7 +148,6 @@ export default function ReportPage() {
                       hour: '2-digit',
                       minute: '2-digit',
                     })}
-                    {' '}· Попытка {data.submissionStatus.attempt_number}
                   </p>
                 </>
               ) : (
