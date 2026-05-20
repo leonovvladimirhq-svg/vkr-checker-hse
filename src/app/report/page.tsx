@@ -83,6 +83,9 @@ export default function ReportPage() {
               Преподаватель
             </Link>
             <span className="bg-white/30 px-4 py-2 rounded-lg text-sm font-medium">Итоговый отчет/Статус работы</span>
+            <Link href="/course" className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition">
+              Курсовая работа
+            </Link>
           </nav>
         </div>
         <div className="border-t border-white/10">

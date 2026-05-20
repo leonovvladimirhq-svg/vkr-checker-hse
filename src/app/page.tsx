@@ -607,6 +607,9 @@ function Header({ onLogout }: { onLogout?: () => void }) {
           <Link href="/report" className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition">
             Итоговый отчет/Статус работы
           </Link>
+          <Link href="/course" className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition">
+            Курсовая работа
+          </Link>
           {onLogout && (
             <button onClick={onLogout}
               className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition"

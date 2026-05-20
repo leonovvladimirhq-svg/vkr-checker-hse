@@ -354,6 +354,9 @@ export default function TeacherPage() {
             <Link href="/report" className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition">
               Итоговый отчет/Статус работы
             </Link>
+            <Link href="/course" className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition">
+              Курсовая работа
+            </Link>
             <button onClick={handleLogout}
               className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition"
               title="Выйти (удалить сохранённый вход)">
