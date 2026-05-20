@@ -252,10 +252,13 @@ export async function analyzeCourseWork(
     ...(supportsTemperature ? { temperature: 0.2 } : {}),
   };
 
+  // 16 000 токенов: при priorityAdvice без лимита + детальном разборе разделов
+  // ответ может занимать ~30–40 тыс. символов. С 6 000 токенов модель обрезалась
+  // посередине строки и ломала JSON ("Unterminated string at position ~20k").
   if (useMaxCompletionTokens) {
-    requestParams.max_completion_tokens = 6000;
+    requestParams.max_completion_tokens = 16000;
   } else {
-    requestParams.max_tokens = 6000;
+    requestParams.max_tokens = 16000;
   }
 
   if (supportsJsonFormat) {
@@ -273,20 +276,96 @@ export async function analyzeCourseWork(
 
   const completion = await openai.chat.completions.create(requestParams);
   const content = completion.choices[0]?.message?.content;
+  const finishReason = completion.choices[0]?.finish_reason;
   if (!content) throw new Error('GPT вернул пустой ответ');
 
   let jsonStr = content;
   const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (jsonMatch) jsonStr = jsonMatch[1].trim();
 
-  let parsed: CourseAnalysisResult;
+  let parsed: Partial<CourseAnalysisResult> | null = null;
   try {
-    parsed = JSON.parse(jsonStr) as CourseAnalysisResult;
+    parsed = JSON.parse(jsonStr) as Partial<CourseAnalysisResult>;
   } catch (e) {
-    throw new Error('GPT вернул невалидный JSON: ' + (e as Error).message);
+    // JSON, скорее всего, обрезан по лимиту токенов или сломан.
+    // Пробуем починить (закрыть незакрытые строки/массивы/объекты).
+    console.warn(
+      `[course-analyzer] JSON parse failed (finish=${finishReason}, len=${jsonStr.length}). Attempting repair. Error: ${(e as Error).message}`
+    );
+    const repaired = tryRepairTruncatedJson(jsonStr);
+    if (repaired) {
+      try {
+        parsed = JSON.parse(repaired) as Partial<CourseAnalysisResult>;
+        console.warn('[course-analyzer] JSON repair successful — partial result will be returned.');
+      } catch (e2) {
+        throw new Error(
+          `GPT вернул невалидный JSON (finish=${finishReason}, len=${jsonStr.length}): ${(e as Error).message}. Repair тоже не сработал: ${(e2 as Error).message}`
+        );
+      }
+    } else {
+      throw new Error(
+        `GPT вернул невалидный JSON (finish=${finishReason}, len=${jsonStr.length}): ${(e as Error).message}`
+      );
+    }
   }
 
   return normaliseResult(parsed, type);
+}
+
+/**
+ * Чинит обрезанный JSON, который не закрылся из-за лимита токенов.
+ * Алгоритм:
+ *  1. Идёт по строке, ведёт стек скобок (`{ [`).
+ *  2. Если оказались внутри строки (`"`) — обрезаем до последней `"` ИЛИ закрываем строку.
+ *  3. Закрываем все открытые массивы и объекты в правильном порядке.
+ * Это даёт частичный, но валидный JSON — клиенту покажется усечённый, но рабочий ответ.
+ */
+function tryRepairTruncatedJson(s: string): string | null {
+  const stack: Array<'{' | '['> = [];
+  let inString = false;
+  let escape = false;
+  let lastSafeEnd = -1; // позиция после последнего полностью закрытого значения вне строки
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\') { escape = true; continue; }
+    if (ch === '"') {
+      inString = !inString;
+      if (!inString) lastSafeEnd = i + 1;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === '{' || ch === '[') stack.push(ch);
+    else if (ch === '}' && stack[stack.length - 1] === '{') { stack.pop(); lastSafeEnd = i + 1; }
+    else if (ch === ']' && stack[stack.length - 1] === '[') { stack.pop(); lastSafeEnd = i + 1; }
+    else if (ch === ',' && stack.length > 0) lastSafeEnd = i; // вне строки — безопасная точка между элементами
+  }
+
+  if (stack.length === 0 && !inString) return null; // считаем, что починка не нужна — пусть кидает исходную ошибку
+
+  // Стратегия: обрезаем до last safe end, потом закрываем всё, что в стеке.
+  let truncated = lastSafeEnd > 0 ? s.slice(0, lastSafeEnd) : s;
+  // Снова считаем состояние стека для truncated.
+  const reStack: Array<'{' | '['> = [];
+  let reIn = false;
+  let reEsc = false;
+  for (let i = 0; i < truncated.length; i++) {
+    const ch = truncated[i];
+    if (reEsc) { reEsc = false; continue; }
+    if (ch === '\\') { reEsc = true; continue; }
+    if (ch === '"') { reIn = !reIn; continue; }
+    if (reIn) continue;
+    if (ch === '{' || ch === '[') reStack.push(ch);
+    else if (ch === '}' && reStack[reStack.length - 1] === '{') reStack.pop();
+    else if (ch === ']' && reStack[reStack.length - 1] === '[') reStack.pop();
+  }
+  if (reIn) return null; // строка не закрыта даже после обрезки — починить надёжно нельзя
+  // Убираем trailing запятую если есть
+  truncated = truncated.replace(/,\s*$/, '');
+  // Закрываем стек
+  const closers = reStack.reverse().map(c => (c === '{' ? '}' : ']')).join('');
+  return truncated + closers;
 }
 
 // ---------- Post-processing / safety ----------
