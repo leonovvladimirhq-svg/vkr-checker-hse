@@ -41,7 +41,7 @@ interface CourseAnalysisResult {
   logicAndCoherence: { issues: string[]; strengths: string[] };
   textQuality: { issues: string[]; strengths: string[] };
   recommendations: Recommendation[];
-  top5: string[];
+  priorityAdvice: string[];
   disclaimer: string;
 }
 
@@ -279,13 +279,13 @@ export default function CoursePage() {
             </div>
           </div>
 
-          {/* Топ-5 рекомендаций */}
+          {/* Приоритетные рекомендации (без лимита) */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6">
             <h3 className="text-lg font-bold text-blue-800 mb-4">
-              🎯 Топ-5 приоритетных рекомендаций
+              🎯 Приоритетные рекомендации
             </h3>
             <ol className="space-y-3">
-              {a.top5.map((tip, i) => (
+              {a.priorityAdvice.map((tip, i) => (
                 <li key={i} className="flex gap-3 items-start bg-blue-50 rounded-lg px-4 py-3 border border-blue-100">
                   <span className="flex-shrink-0 w-7 h-7 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-sm">
                     {i + 1}

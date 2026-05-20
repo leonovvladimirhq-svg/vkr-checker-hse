@@ -83,7 +83,8 @@ export async function POST(req: NextRequest) {
       headings_json: JSON.stringify(doc.headings.slice(0, 100)),
       extracted_text_preview: doc.text.substring(0, 2000),
       analysis_json: JSON.stringify(analysis),
-      top5_json: JSON.stringify(analysis.top5),
+      // Колонка БД называется top5_json исторически, но теперь хранит priorityAdvice (без лимита).
+      top5_json: JSON.stringify(analysis.priorityAdvice),
     });
 
     return NextResponse.json({
