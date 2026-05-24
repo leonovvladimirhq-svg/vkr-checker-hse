@@ -56,6 +56,35 @@ interface StudentsData {
   settings: { digestEmail: string; currentWave: string };
 }
 
+// ===== Курсовые работы =====
+interface CourseSummary {
+  id: number;
+  studentName: string;
+  workTitle: string | null;
+  courseType: 'research' | 'project';
+  fileName: string | null;
+  wordCount: number | null;
+  pageEstimate: number | null;
+  submittedAt: string;
+  createdAt: string;
+  readinessStatus: string | null;
+  readinessText: string | null;
+  attemptNumber: number;
+  hasFile: boolean;
+}
+
+interface CourseDetail extends CourseSummary {
+  analysis: any | null;
+}
+
+const READINESS_COLORS: Record<string, string> = {
+  ready_for_credit: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+  almost_there:     'bg-lime-100 text-lime-800 border-lime-300',
+  right_direction:  'bg-yellow-100 text-yellow-800 border-yellow-300',
+  fix_then_defend:  'bg-amber-100 text-amber-800 border-amber-300',
+  critical_issues:  'bg-red-100 text-red-800 border-red-300',
+};
+
 export default function TeacherPage() {
   // Авторизация
   const [authenticated, setAuthenticated] = useState(false);
@@ -78,6 +107,12 @@ export default function TeacherPage() {
 
   // Модальное окно с деталями проверки
   const [selectedAttempt, setSelectedAttempt] = useState<AttemptDetail | null>(null);
+
+  // === Курсовые работы (отдельный блок) ===
+  const [courseList, setCourseList] = useState<CourseSummary[]>([]);
+  const [courseDetail, setCourseDetail] = useState<CourseDetail | null>(null);
+  const [reanalyzingId, setReanalyzingId] = useState<number | null>(null);
+  const [courseMsg, setCourseMsg] = useState('');
   const [loadingDetail, setLoadingDetail] = useState(false);
 
   // Подтверждение удаления
@@ -113,7 +148,68 @@ export default function TeacherPage() {
     if (!authenticated) return;
     fetchData();
     fetchToday();
+    fetchCourseList();
   }, [authenticated]);
+
+  const fetchCourseList = async () => {
+    try {
+      const res = await fetch('/api/course/teacher');
+      const json = await res.json();
+      setCourseList(json.items || []);
+    } catch (err) {
+      console.error('Failed to fetch course works:', err);
+    }
+  };
+
+  const openCourseDetail = async (id: number) => {
+    try {
+      const res = await fetch(`/api/course/teacher?id=${id}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Не удалось загрузить детали');
+      setCourseDetail(json as CourseDetail);
+    } catch (err: any) {
+      setCourseMsg('Ошибка: ' + (err.message || err));
+    }
+  };
+
+  const downloadCourseFile = (id: number) => {
+    window.open(`/api/course/download?id=${id}`, '_blank');
+  };
+
+  const reanalyzeCourse = async (id: number) => {
+    if (!window.confirm('Запустить повторный анализ через ChatGPT и сгенерировать Word-отзыв? Это займёт 1–2 минуты.')) return;
+    setReanalyzingId(id);
+    setCourseMsg('');
+    try {
+      const res = await fetch('/api/course/reanalyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Ошибка ${res.status}`);
+      }
+      // Скачиваем .docx
+      const blob = await res.blob();
+      const disposition = res.headers.get('content-disposition') || '';
+      const match = disposition.match(/filename\*=UTF-8''([^;]+)/i) || disposition.match(/filename="?([^";]+)"?/i);
+      const filename = match ? decodeURIComponent(match[1]) : `Отзыв_${id}.docx`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setCourseMsg('✓ Word-отзыв сгенерирован и скачан.');
+    } catch (err: any) {
+      setCourseMsg('Ошибка повторного исследования: ' + (err.message || err));
+    } finally {
+      setReanalyzingId(null);
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -581,6 +677,84 @@ export default function TeacherPage() {
             <p className="text-sm text-slate-500">Сегодня никто не загружал работы</p>
           )}
         </div>
+
+        {/* ===== Курсовые работы студентов ===== */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6 mt-6">
+          <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
+            <div>
+              <h2 className="text-lg font-bold text-blue-800">📚 Курсовые работы студентов</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Отдельный контур от ВКР: работы, отправленные через модуль «Курсовая работа»</p>
+            </div>
+            <button onClick={fetchCourseList} className="text-xs px-3 py-1.5 rounded-md bg-slate-100 hover:bg-slate-200 border border-slate-200">
+              ↻ Обновить
+            </button>
+          </div>
+
+          {courseMsg && (
+            <div className={`text-sm rounded-lg px-4 py-2.5 mb-3 ${courseMsg.startsWith('✓') ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-red-50 border border-red-200 text-red-700'}`}>
+              {courseMsg}
+            </div>
+          )}
+
+          {courseList.length === 0 ? (
+            <p className="text-sm text-slate-500">Пока ни одна курсовая не отправлена.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b-2 border-slate-200 text-left text-xs text-slate-500 uppercase">
+                    <th className="py-2 px-2">№</th>
+                    <th className="py-2 px-2">ФИО</th>
+                    <th className="py-2 px-2">Тема работы</th>
+                    <th className="py-2 px-2">Тип</th>
+                    <th className="py-2 px-2">Дата отправки</th>
+                    <th className="py-2 px-2">Итог анализа</th>
+                    <th className="py-2 px-2 text-right">Действия</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {courseList.map((c, i) => (
+                    <tr key={c.id} className="border-b border-slate-100 hover:bg-slate-50">
+                      <td className="py-2 px-2 text-slate-400">{i + 1}</td>
+                      <td className="py-2 px-2 font-medium">{c.studentName}</td>
+                      <td className="py-2 px-2 text-slate-700 max-w-xs truncate" title={c.workTitle || ''}>{c.workTitle || '—'}</td>
+                      <td className="py-2 px-2 text-xs text-slate-500">{c.courseType === 'research' ? 'ИКР' : 'КП'}</td>
+                      <td className="py-2 px-2 text-xs text-slate-500 whitespace-nowrap">
+                        {c.submittedAt ? new Date(c.submittedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+                      </td>
+                      <td className="py-2 px-2">
+                        {c.readinessStatus ? (
+                          <span className={`text-xs px-2 py-1 rounded-md border font-semibold ${READINESS_COLORS[c.readinessStatus] || 'bg-slate-100 text-slate-700 border-slate-300'}`}>
+                            {c.readinessText || c.readinessStatus}
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="py-2 px-2 text-right whitespace-nowrap">
+                        <button onClick={() => openCourseDetail(c.id)}
+                          className="text-xs px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 mr-1"
+                          title="Посмотреть результаты анализа и рекомендации">
+                          👁 Подробнее
+                        </button>
+                        <button onClick={() => downloadCourseFile(c.id)}
+                          disabled={!c.hasFile}
+                          className="text-xs px-2 py-1 rounded bg-slate-100 text-slate-700 hover:bg-slate-200 mr-1 disabled:opacity-40"
+                          title="Скачать оригинал работы">
+                          📥 Скачать
+                        </button>
+                        <button onClick={() => reanalyzeCourse(c.id)}
+                          disabled={reanalyzingId === c.id || !c.hasFile}
+                          className="text-xs px-2 py-1 rounded bg-violet-100 text-violet-800 hover:bg-violet-200 disabled:opacity-40"
+                          title="Повторный анализ через ChatGPT + Word-отзыв по шаблону">
+                          {reanalyzingId === c.id ? '⏳ Идёт…' : '🔄 Повторное исследование'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </main>
 
       {/* Модальное окно деталей проверки */}
@@ -597,6 +771,115 @@ export default function TeacherPage() {
             ) : selectedAttempt && (
               <AttemptDetailModal attempt={selectedAttempt} onClose={() => setSelectedAttempt(null)} onApprove={handleApprove} onReject={handleReject} />
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ===== Модалка с деталями курсовой работы ===== */}
+      {courseDetail && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center pt-10 overflow-y-auto print:hidden"
+          onClick={(e) => { if (e.target === e.currentTarget) setCourseDetail(null); }}>
+          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full mx-4 my-4 max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-7 py-4 flex justify-between items-start z-10">
+              <div>
+                <h2 className="text-lg font-bold text-blue-800">{courseDetail.studentName}</h2>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  {courseDetail.courseType === 'research' ? 'Исследовательская курсовая' : 'Курсовой проект'}
+                  {' · попытка №'}{courseDetail.attemptNumber}
+                  {courseDetail.submittedAt && ' · отправлена ' + new Date(courseDetail.submittedAt).toLocaleString('ru-RU')}
+                </p>
+                {courseDetail.workTitle && <p className="text-sm mt-1"><span className="font-semibold">Тема:</span> {courseDetail.workTitle}</p>}
+              </div>
+              <button onClick={() => setCourseDetail(null)} className="text-slate-400 hover:text-slate-700 text-2xl leading-none">×</button>
+            </div>
+
+            <div className="p-7">
+              {courseDetail.readinessText && (
+                <div className={`rounded-lg border-2 px-4 py-3 mb-4 font-semibold ${READINESS_COLORS[courseDetail.readinessStatus || ''] || 'bg-slate-50 text-slate-700 border-slate-300'}`}>
+                  Готовность к зачёту: {courseDetail.readinessText}
+                </div>
+              )}
+
+              {courseDetail.analysis?.overallSummary && (
+                <div className="mb-4">
+                  <h3 className="text-sm font-bold text-blue-800 mb-1.5">Общая оценка</h3>
+                  <p className="text-sm text-slate-700 leading-relaxed">{courseDetail.analysis.overallSummary}</p>
+                </div>
+              )}
+
+              {courseDetail.analysis?.priorityAdvice?.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-sm font-bold text-blue-800 mb-2">🎯 Приоритетные рекомендации ({courseDetail.analysis.priorityAdvice.length})</h3>
+                  <ol className="space-y-2">
+                    {courseDetail.analysis.priorityAdvice.map((tip: string, i: number) => (
+                      <li key={i} className="flex gap-2 items-start bg-blue-50 rounded px-3 py-2 border border-blue-100">
+                        <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-xs">{i + 1}</span>
+                        <span className="text-sm text-slate-800">{tip}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+
+              {courseDetail.analysis?.structuralAnalysis && (
+                <div className="mb-4">
+                  <h3 className="text-sm font-bold text-blue-800 mb-2">Структура работы</h3>
+                  {courseDetail.analysis.structuralAnalysis.missingSections?.length > 0 && (
+                    <div className="text-xs bg-red-50 border border-red-200 text-red-700 rounded px-3 py-2 mb-2">
+                      <span className="font-semibold">Отсутствует:</span> {courseDetail.analysis.structuralAnalysis.missingSections.join(', ')}
+                    </div>
+                  )}
+                  {courseDetail.analysis.structuralAnalysis.sections?.map((s: any, i: number) => (
+                    <div key={i} className="border border-slate-200 rounded p-2.5 mb-1.5 text-sm">
+                      <div className="flex justify-between gap-2"><span className="font-semibold">{s.section}</span><span className="text-xs text-slate-500">{s.verdict}</span></div>
+                      {s.comment && <p className="text-xs text-slate-600 mt-1">{s.comment}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {courseDetail.analysis?.recommendations?.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-sm font-bold text-blue-800 mb-2">Все рекомендации ({courseDetail.analysis.recommendations.length})</h3>
+                  <div className="space-y-2">
+                    {courseDetail.analysis.recommendations.map((r: any, i: number) => (
+                      <div key={i} className="border border-slate-200 rounded p-2.5 text-sm">
+                        <div className="text-xs text-slate-500 mb-0.5">[{r.category}] {r.section && '· ' + r.section}</div>
+                        <div className="font-medium">{r.issue}</div>
+                        <div className="text-slate-600 text-sm mt-1">{r.suggestion}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3 mt-6 pt-4 border-t border-slate-200">
+                <button onClick={() => downloadCourseFile(courseDetail.id)}
+                  disabled={!courseDetail.hasFile}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold bg-slate-100 hover:bg-slate-200 disabled:opacity-40">
+                  📥 Скачать оригинал
+                </button>
+                <button onClick={() => { reanalyzeCourse(courseDetail.id); }}
+                  disabled={reanalyzingId === courseDetail.id || !courseDetail.hasFile}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-40">
+                  {reanalyzingId === courseDetail.id ? '⏳ Генерация…' : '🔄 Повторное исследование (.docx)'}
+                </button>
+                <button onClick={() => setCourseDetail(null)} className="ml-auto px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700">
+                  Закрыть
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Оверлей при генерации Word */}
+      {reanalyzingId !== null && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+          <div className="bg-white rounded-xl p-10 text-center max-w-md shadow-xl">
+            <div className="w-12 h-12 border-4 border-slate-200 border-t-violet-600 rounded-full animate-spin mx-auto mb-4" />
+            <div className="font-semibold text-slate-800 mb-2">Повторный анализ через ChatGPT…</div>
+            <div className="text-sm text-slate-500">Заполнение шаблона отзыва и генерация Word-файла. Может занять 1–2 минуты.</div>
           </div>
         </div>
       )}

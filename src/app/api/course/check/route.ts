@@ -20,14 +20,22 @@ export async function POST(req: NextRequest) {
 
     const studentNameRaw = formData.get('studentName') as string | null;
     const courseType = formData.get('courseType') as CourseType | null;
+    const workTitleRaw = formData.get('workTitle') as string | null;
     const file = formData.get('file') as File | null;
 
     const studentName = studentNameRaw?.trim() || '';
+    const workTitle = workTitleRaw?.trim() || '';
 
     // --- Валидация ---
     if (!studentName || !courseType || !file) {
       return NextResponse.json(
         { error: 'Не указаны обязательные поля: ФИО, тип курсовой, файл' },
+        { status: 400 }
+      );
+    }
+    if (!workTitle || workTitle.length < 5) {
+      return NextResponse.json(
+        { error: 'Укажите тему работы (минимум 5 символов)' },
         { status: 400 }
       );
     }
@@ -85,6 +93,9 @@ export async function POST(req: NextRequest) {
       analysis_json: JSON.stringify(analysis),
       // Колонка БД называется top5_json исторически, но теперь хранит priorityAdvice (без лимита).
       top5_json: JSON.stringify(analysis.priorityAdvice),
+      work_title: workTitle,
+      readiness_status: analysis.readinessStatus,
+      readiness_text: analysis.readinessStatusText,
     });
 
     return NextResponse.json({
@@ -92,6 +103,7 @@ export async function POST(req: NextRequest) {
       attemptNumber,
       studentName,
       courseType,
+      workTitle,
       documentInfo: {
         fileName: file.name,
         wordCount: doc.wordCount,

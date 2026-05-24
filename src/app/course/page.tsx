@@ -42,6 +42,9 @@ interface CourseAnalysisResult {
   textQuality: { issues: string[]; strengths: string[] };
   recommendations: Recommendation[];
   priorityAdvice: string[];
+  readinessStatus: 'ready_for_credit' | 'almost_there' | 'right_direction' | 'fix_then_defend' | 'critical_issues';
+  readinessStatusText: string;
+  errorClassification: { structural: number; content: number; formatting: number; ai_usage: number; other: number };
   disclaimer: string;
 }
 
@@ -50,6 +53,7 @@ interface CourseCheckResponse {
   attemptNumber: number;
   studentName: string;
   courseType: 'research' | 'project';
+  workTitle: string;
   documentInfo: {
     fileName: string;
     wordCount: number;
@@ -59,6 +63,14 @@ interface CourseCheckResponse {
   analysis: CourseAnalysisResult;
   error?: string;
 }
+
+const READINESS_STYLES: Record<CourseAnalysisResult['readinessStatus'], { bg: string; border: string; text: string; emoji: string }> = {
+  ready_for_credit: { bg: 'bg-emerald-50', border: 'border-emerald-500', text: 'text-emerald-800', emoji: '✓' },
+  almost_there:     { bg: 'bg-lime-50',    border: 'border-lime-500',    text: 'text-lime-800',    emoji: '🌱' },
+  right_direction:  { bg: 'bg-yellow-50',  border: 'border-yellow-500',  text: 'text-yellow-800',  emoji: '🧭' },
+  fix_then_defend:  { bg: 'bg-amber-50',   border: 'border-amber-500',   text: 'text-amber-800',   emoji: '⚒️' },
+  critical_issues:  { bg: 'bg-red-50',     border: 'border-red-500',     text: 'text-red-800',     emoji: '⚠️' },
+};
 
 const CATEGORY_LABELS: Record<RecommendationCategory, string> = {
   structure: 'Структура',
@@ -84,8 +96,14 @@ export default function CoursePage() {
 
   // --- Форма ---
   const [studentName, setStudentName] = useState('');
+  const [workTitle, setWorkTitle] = useState('');
   const [courseType, setCourseType] = useState<'research' | 'project' | ''>('');
   const [file, setFile] = useState<File | null>(null);
+
+  // --- Отправка преподавателю ---
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
   // --- Состояние проверки ---
   const [loading, setLoading] = useState(false);
@@ -121,7 +139,7 @@ export default function CoursePage() {
 
   // --- Валидация ---
   const nameWords = studentName.trim().split(/\s+/).filter(Boolean).length;
-  const isFormValid = nameWords >= 2 && !!courseType && !!file;
+  const isFormValid = nameWords >= 2 && !!courseType && !!file && workTitle.trim().length >= 5;
 
   // --- Файл ---
   const handleFile = useCallback((f: File) => {
@@ -156,6 +174,7 @@ export default function CoursePage() {
     try {
       const formData = new FormData();
       formData.append('studentName', studentName.trim());
+      formData.append('workTitle', workTitle.trim());
       formData.append('courseType', courseType);
       formData.append('file', file);
 
@@ -164,7 +183,7 @@ export default function CoursePage() {
       await new Promise(r => setTimeout(r, 100));
 
       setLoadingProgress(55);
-      setLoadingStatus('Анализ работы методическим ассистентом...');
+      setLoadingStatus('Анализ работы научным руководителем...');
 
       const res = await fetch('/api/course/check', { method: 'POST', body: formData });
 
@@ -188,10 +207,36 @@ export default function CoursePage() {
     setFile(null);
     setError('');
     setCategoryFilter('all');
+    setSubmitted(false);
+    setSubmitError('');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const exportPDF = () => window.print();
+
+  // --- Отправка работы преподавателю ---
+  const handleSubmitToTeacher = async () => {
+    if (!result || !file) {
+      setSubmitError('Файл работы недоступен. Загрузите работу заново.');
+      return;
+    }
+    setSubmitting(true);
+    setSubmitError('');
+    try {
+      const fd = new FormData();
+      fd.append('attemptId', String(result.attemptId));
+      fd.append('workTitle', result.workTitle || workTitle.trim());
+      fd.append('file', file);
+      const res = await fetch('/api/course/submit', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Ошибка отправки');
+      setSubmitted(true);
+    } catch (err: any) {
+      setSubmitError(err.message || 'Не удалось отправить работу преподавателю');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   // ====================== RENDER ======================
 
@@ -260,9 +305,12 @@ export default function CoursePage() {
                     : 'Курсовой проект'}{' '}
                   &middot; Попытка №{result.attemptNumber}
                 </p>
+                {result.workTitle && (
+                  <p className="text-sm text-slate-700 mt-1.5"><span className="font-semibold">Тема:</span> {result.workTitle}</p>
+                )}
               </div>
               <div className="px-5 py-2 rounded-lg text-sm font-semibold bg-blue-50 text-blue-700 border-2 border-blue-300">
-                🤖 Методический ассистент
+                Разбор работы
               </div>
             </div>
 
@@ -278,6 +326,24 @@ export default function CoursePage() {
               {' '}&middot;{' '}{result.documentInfo.headingsFound} заголовков
             </div>
           </div>
+
+          {/* Готовность к зачёту */}
+          {a.readinessStatusText && (() => {
+            const style = READINESS_STYLES[a.readinessStatus] || READINESS_STYLES.right_direction;
+            return (
+              <div className={`rounded-xl border-2 p-5 mb-6 ${style.bg} ${style.border}`}>
+                <div className="flex items-start gap-4">
+                  <div className="text-3xl flex-shrink-0">{style.emoji}</div>
+                  <div className="flex-1">
+                    <div className={`text-xs uppercase tracking-wide font-semibold ${style.text} opacity-80 mb-1`}>
+                      Общая оценка готовности к зачёту
+                    </div>
+                    <div className={`text-xl font-bold ${style.text}`}>{a.readinessStatusText}</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Приоритетные рекомендации (без лимита) */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6">
@@ -402,6 +468,45 @@ export default function CoursePage() {
             )}
           </div>
 
+          {/* Блок отправки преподавателю */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6 print:hidden">
+            <h3 className="text-base font-bold text-blue-800 mb-2">Готовы отправить работу преподавателю?</h3>
+            <p className="text-sm text-slate-600 mb-4">
+              После отправки работа появится в панели преподавателя — вместе с файлом, результатами анализа,
+              рекомендациями и итоговым статусом. Вы можете доработать работу и отправить её снова — каждая
+              отправка сохраняется как отдельная версия.
+            </p>
+            {submitError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-2.5 mb-3 text-sm">
+                {submitError}
+              </div>
+            )}
+            {submitted ? (
+              <div className="bg-emerald-50 border-2 border-emerald-400 text-emerald-800 rounded-lg px-4 py-3 text-sm font-semibold">
+                ✓ Работа отправлена преподавателю
+              </div>
+            ) : (
+              <button
+                onClick={handleSubmitToTeacher}
+                disabled={submitting}
+                className="px-6 py-3 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-slate-300 transition"
+              >
+                {submitting ? 'Отправляем…' : '📤 Отправить работу преподавателю'}
+              </button>
+            )}
+          </div>
+
+          {/* Оверлей при отправке */}
+          {submitting && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+              <div className="bg-white rounded-xl p-10 text-center max-w-sm shadow-xl">
+                <div className="w-12 h-12 border-4 border-slate-200 border-t-emerald-600 rounded-full animate-spin mx-auto mb-4" />
+                <div className="font-semibold text-slate-800 mb-1">Отправляем работу преподавателю…</div>
+                <div className="text-xs text-red-600 font-medium">Не закрывайте страницу!</div>
+              </div>
+            </div>
+          )}
+
           {/* Кнопки */}
           <div className="flex gap-3 justify-end mt-6 print:hidden">
             <button onClick={exportPDF}
@@ -484,6 +589,20 @@ export default function CoursePage() {
                 <option value="project">Курсовой проект (перерастает в МП)</option>
               </select>
             </div>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold mb-1.5">Тема работы *</label>
+            <input
+              type="text"
+              value={workTitle}
+              onChange={e => setWorkTitle(e.target.value)}
+              placeholder="Например: Коммуникационная стратегия бренда X на рынке Y"
+              className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              maxLength={250}
+            />
+            <p className="text-xs text-slate-400 mt-1">
+              Тема будет видна преподавателю в сводной таблице (минимум 5 символов).
+            </p>
           </div>
         </div>
 
