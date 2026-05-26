@@ -6,3 +6,11 @@ data/vkr.db
 data/vkr.db-shm
 data/vkr.db-wal
 data/uploads/
+data/course-uploads/
+
+# Build artifacts
+tsconfig.tsbuildinfo
+
+# Local-only utilities (load testing and one-off scripts)
+loadtest/
+scripts/

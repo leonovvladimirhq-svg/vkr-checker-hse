@@ -30,6 +30,15 @@ interface Recommendation {
   suggestion: string;
 }
 
+interface DatabaseAnalysisSection {
+  accessible: boolean;
+  fileCount: number;
+  fileCounts: { audio: number; tables: number; docs: number; other: number };
+  issues: string[];
+  strengths: string[];
+  note: string;
+}
+
 interface CourseAnalysisResult {
   overallSummary: string;
   structuralAnalysis: {
@@ -45,6 +54,7 @@ interface CourseAnalysisResult {
   readinessStatus: 'ready_for_credit' | 'almost_there' | 'right_direction' | 'fix_then_defend' | 'critical_issues';
   readinessStatusText: string;
   errorClassification: { structural: number; content: number; formatting: number; ai_usage: number; other: number };
+  databaseAnalysis: DatabaseAnalysisSection;
   disclaimer: string;
 }
 
@@ -59,6 +69,8 @@ interface CourseCheckResponse {
     wordCount: number;
     pageEstimate: number;
     headingsFound: number;
+    bodyCharCountWithSpaces?: number;
+    bodyWordCount?: number;
   };
   analysis: CourseAnalysisResult;
   error?: string;
@@ -98,6 +110,7 @@ export default function CoursePage() {
   const [studentName, setStudentName] = useState('');
   const [workTitle, setWorkTitle] = useState('');
   const [courseType, setCourseType] = useState<'research' | 'project' | ''>('');
+  const [dbLink, setDbLink] = useState('');
   const [file, setFile] = useState<File | null>(null);
 
   // --- Отправка преподавателю ---
@@ -139,7 +152,12 @@ export default function CoursePage() {
 
   // --- Валидация ---
   const nameWords = studentName.trim().split(/\s+/).filter(Boolean).length;
-  const isFormValid = nameWords >= 2 && !!courseType && !!file && workTitle.trim().length >= 5;
+  const isFormValid =
+    nameWords >= 2 &&
+    !!courseType &&
+    !!file &&
+    workTitle.trim().length >= 5 &&
+    dbLink.trim().length > 0;
 
   // --- Файл ---
   const handleFile = useCallback((f: File) => {
@@ -176,14 +194,19 @@ export default function CoursePage() {
       formData.append('studentName', studentName.trim());
       formData.append('workTitle', workTitle.trim());
       formData.append('courseType', courseType);
+      formData.append('dbLink', dbLink.trim());
       formData.append('file', file);
 
       setLoadingProgress(30);
       setLoadingStatus('Извлечение текста...');
       await new Promise(r => setTimeout(r, 100));
 
-      setLoadingProgress(55);
-      setLoadingStatus('Анализ работы научным руководителем...');
+      setLoadingProgress(50);
+      setLoadingStatus('Проверка базы данных на Яндекс.Диске...');
+      await new Promise(r => setTimeout(r, 100));
+
+      setLoadingProgress(65);
+      setLoadingStatus('Анализ работы ИИ-консультантом по курсовым работам...');
 
       const res = await fetch('/api/course/check', { method: 'POST', body: formData });
 
@@ -288,6 +311,31 @@ export default function CoursePage() {
         ? a.recommendations
         : a.recommendations.filter(r => r.category === categoryFilter);
 
+    // ---- Принцип бургера: собираем сильные стороны и слабые в отдельные блоки ----
+    const allStrengths: string[] = [
+      ...(a.logicAndCoherence.strengths || []),
+      ...(a.textQuality.strengths || []),
+      ...(a.databaseAnalysis?.strengths || []),
+    ];
+    const okSections = a.structuralAnalysis.sections.filter(s => s.verdict === 'ok' && s.present);
+    if (okSections.length > 0) {
+      allStrengths.unshift(`Раздел${okSections.length > 1 ? 'ы' : ''} «${okSections.map(s => s.section).join('», «')}» соответствуют ожидаемой структуре.`);
+    }
+
+    const allIssues: string[] = [
+      ...(a.logicAndCoherence.issues || []),
+      ...(a.textQuality.issues || []),
+      ...(a.databaseAnalysis?.issues || []),
+    ];
+    const missingSections = a.structuralAnalysis.missingSections;
+    const tooShortSections = a.structuralAnalysis.sections.filter(s => s.verdict === 'too_short');
+    if (missingSections.length > 0) {
+      allIssues.unshift(`Отсутствующие разделы: ${missingSections.join(', ')}.`);
+    }
+    if (tooShortSections.length > 0) {
+      allIssues.push(`Объём недостаточен в разделах: ${tooShortSections.map(s => s.section).join(', ')}.`);
+    }
+
     return (
       <div className="min-h-screen bg-slate-50">
         <Header onLogout={handleLogout} />
@@ -324,10 +372,17 @@ export default function CoursePage() {
               {' '}&middot;{' '}{result.documentInfo.wordCount.toLocaleString()} слов
               {' '}&middot;{' '}~{result.documentInfo.pageEstimate} стр.
               {' '}&middot;{' '}{result.documentInfo.headingsFound} заголовков
+              {typeof result.documentInfo.bodyCharCountWithSpaces === 'number' && (
+                <>
+                  {' '}&middot;{' '}
+                  <span className="font-semibold">Тело работы:</span>{' '}
+                  {result.documentInfo.bodyCharCountWithSpaces.toLocaleString('ru-RU')} знаков с пробелами
+                </>
+              )}
             </div>
           </div>
 
-          {/* Готовность к зачёту */}
+          {/* 1. Готовность к зачёту */}
           {a.readinessStatusText && (() => {
             const style = READINESS_STYLES[a.readinessStatus] || READINESS_STYLES.right_direction;
             return (
@@ -345,24 +400,7 @@ export default function CoursePage() {
             );
           })()}
 
-          {/* Приоритетные рекомендации (без лимита) */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6">
-            <h3 className="text-lg font-bold text-blue-800 mb-4">
-              🎯 Приоритетные рекомендации
-            </h3>
-            <ol className="space-y-3">
-              {a.priorityAdvice.map((tip, i) => (
-                <li key={i} className="flex gap-3 items-start bg-blue-50 rounded-lg px-4 py-3 border border-blue-100">
-                  <span className="flex-shrink-0 w-7 h-7 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-sm">
-                    {i + 1}
-                  </span>
-                  <span className="text-sm text-slate-800 leading-relaxed">{tip}</span>
-                </li>
-              ))}
-            </ol>
-          </div>
-
-          {/* Общая оценка */}
+          {/* 2. Общая оценка */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6">
             <h3 className="text-base font-bold text-blue-800 mb-3">Общая оценка</h3>
             <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
@@ -370,16 +408,43 @@ export default function CoursePage() {
             </p>
           </div>
 
-          {/* Структура работы */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6">
-            <h3 className="text-base font-bold text-blue-800 mb-3">Структура работы</h3>
+          {/* 3. Сильные стороны (принцип бургера: сначала хорошее) */}
+          {allStrengths.length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-emerald-200 p-7 mb-6">
+              <h3 className="text-base font-bold text-emerald-800 mb-3">
+                ✅ Что получилось хорошо
+              </h3>
+              <ul className="space-y-2">
+                {allStrengths.map((s, i) => (
+                  <li key={i} className="text-sm text-slate-700 flex gap-2 items-start">
+                    <span className="text-emerald-500 flex-shrink-0">•</span>
+                    <span>{s}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
-            {a.structuralAnalysis.missingSections.length > 0 && (
-              <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-sm text-red-700">
-                <span className="font-semibold">Отсутствующие разделы:</span>{' '}
-                {a.structuralAnalysis.missingSections.join(', ')}
-              </div>
-            )}
+          {/* 4. Что стоит доработать */}
+          {allIssues.length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-amber-200 p-7 mb-6">
+              <h3 className="text-base font-bold text-amber-800 mb-3">
+                🛠 Что стоит доработать
+              </h3>
+              <ul className="space-y-2">
+                {allIssues.map((s, i) => (
+                  <li key={i} className="text-sm text-slate-700 flex gap-2 items-start">
+                    <span className="text-amber-500 flex-shrink-0">•</span>
+                    <span>{s}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* 5. Разбор по разделам */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6">
+            <h3 className="text-base font-bold text-blue-800 mb-3">Разбор по разделам</h3>
 
             {a.structuralAnalysis.extraSections.length > 0 && (
               <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
@@ -413,21 +478,93 @@ export default function CoursePage() {
             </div>
           </div>
 
-          {/* Логика и связность */}
-          <DualBlock
-            title="Логика и связность"
-            issues={a.logicAndCoherence.issues}
-            strengths={a.logicAndCoherence.strengths}
-          />
+          {/* 6. Анализ базы данных */}
+          {a.databaseAnalysis && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6">
+              <h3 className="text-base font-bold text-blue-800 mb-3">📁 Анализ базы данных</h3>
 
-          {/* Качество текста */}
-          <DualBlock
-            title="Качество текста"
-            issues={a.textQuality.issues}
-            strengths={a.textQuality.strengths}
-          />
+              <div className={`rounded-lg p-3 mb-3 text-sm ${a.databaseAnalysis.accessible ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-red-50 border border-red-200 text-red-700'}`}>
+                {a.databaseAnalysis.accessible
+                  ? `✓ База данных доступна. Файлов в папке: ${a.databaseAnalysis.fileCount}.`
+                  : `⚠ ${a.databaseAnalysis.note || 'База данных недоступна'}`}
+              </div>
 
-          {/* Расширенные рекомендации */}
+              {a.databaseAnalysis.accessible && a.databaseAnalysis.fileCounts && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3 text-xs">
+                  <div className="bg-slate-50 rounded-lg p-2 text-center">
+                    <div className="text-slate-500">Аудио/видео</div>
+                    <div className="font-bold text-slate-800">{a.databaseAnalysis.fileCounts.audio}</div>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-2 text-center">
+                    <div className="text-slate-500">Таблицы</div>
+                    <div className="font-bold text-slate-800">{a.databaseAnalysis.fileCounts.tables}</div>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-2 text-center">
+                    <div className="text-slate-500">Документы</div>
+                    <div className="font-bold text-slate-800">{a.databaseAnalysis.fileCounts.docs}</div>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-2 text-center">
+                    <div className="text-slate-500">Другое</div>
+                    <div className="font-bold text-slate-800">{a.databaseAnalysis.fileCounts.other}</div>
+                  </div>
+                </div>
+              )}
+
+              {a.databaseAnalysis.note && a.databaseAnalysis.accessible && (
+                <p className="text-sm text-slate-700 mb-3 leading-relaxed">{a.databaseAnalysis.note}</p>
+              )}
+
+              {(a.databaseAnalysis.strengths.length > 0 || a.databaseAnalysis.issues.length > 0) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {a.databaseAnalysis.strengths.length > 0 && (
+                    <div>
+                      <div className="text-xs font-bold text-emerald-700 uppercase tracking-wide mb-2">Сильные стороны БД</div>
+                      <ul className="space-y-1.5">
+                        {a.databaseAnalysis.strengths.map((s, i) => (
+                          <li key={i} className="text-sm text-slate-700 flex gap-2">
+                            <span className="text-emerald-500 flex-shrink-0">•</span>
+                            <span>{s}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {a.databaseAnalysis.issues.length > 0 && (
+                    <div>
+                      <div className="text-xs font-bold text-red-700 uppercase tracking-wide mb-2">Что улучшить</div>
+                      <ul className="space-y-1.5">
+                        {a.databaseAnalysis.issues.map((s, i) => (
+                          <li key={i} className="text-sm text-slate-700 flex gap-2">
+                            <span className="text-red-500 flex-shrink-0">•</span>
+                            <span>{s}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 7. Приоритетные рекомендации (план действий) */}
+          <div className="bg-white rounded-xl shadow-sm border border-blue-200 p-7 mb-6">
+            <h3 className="text-lg font-bold text-blue-800 mb-4">
+              🎯 Приоритетные рекомендации
+            </h3>
+            <ol className="space-y-3">
+              {a.priorityAdvice.map((tip, i) => (
+                <li key={i} className="flex gap-3 items-start bg-blue-50 rounded-lg px-4 py-3 border border-blue-100">
+                  <span className="flex-shrink-0 w-7 h-7 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-sm">
+                    {i + 1}
+                  </span>
+                  <span className="text-sm text-slate-800 leading-relaxed">{tip}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+
+          {/* 8. Расширенные рекомендации (с фильтром по категориям) */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6">
             <h3 className="text-base font-bold text-blue-800 mb-3">Все рекомендации</h3>
 
@@ -558,12 +695,12 @@ export default function CoursePage() {
         <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4 mb-6 text-sm text-blue-900 leading-relaxed">
           <p className="font-semibold mb-1">Интеллектуальная самопроверка курсовой работы</p>
           <p>
-            Загрузите черновик курсовой — сервис проанализирует структуру, объёмы разделов, логику изложения и
-            качество текста относительно методических рекомендаций ОП «Интегрированные коммуникации» и предложит
-            <strong> топ-5 приоритетных советов</strong> по улучшению.
+            Загрузите черновик курсовой — ИИ-консультант проанализирует структуру, объёмы разделов, логику изложения,
+            качество текста и содержимое базы данных относительно методических рекомендаций ОП «Интегрированные коммуникации»
+            и предложит <strong>приоритетные советы</strong> по улучшению.
           </p>
           <p className="mt-2 text-blue-800">
-            ⚠ Сервис даёт рекомендации, но <strong>не выполняет работу за вас</strong>. Итоговое решение по работе
+            ⚠ ИИ-консультант даёт рекомендации, но <strong>не выполняет работу за вас</strong>. Итоговое решение по работе
             принимает научный руководитель.
           </p>
         </div>
@@ -590,7 +727,7 @@ export default function CoursePage() {
               </select>
             </div>
           </div>
-          <div>
+          <div className="mb-4">
             <label className="block text-sm font-semibold mb-1.5">Тема работы *</label>
             <input
               type="text"
@@ -602,6 +739,20 @@ export default function CoursePage() {
             />
             <p className="text-xs text-slate-400 mt-1">
               Тема будет видна преподавателю в сводной таблице (минимум 5 символов).
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold mb-1.5">Ссылка на базу данных (Яндекс.Диск) *</label>
+            <input
+              type="url"
+              value={dbLink}
+              onChange={e => setDbLink(e.target.value)}
+              placeholder="https://disk.yandex.ru/d/..."
+              className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            />
+            <p className="text-xs text-slate-400 mt-1">
+              Публичная папка с эмпирическими данными (интервью, опросы, таблицы, контент-анализ).
+              ИИ-консультант сверит содержимое с заявленными в работе методами исследования.
             </p>
           </div>
         </div>
@@ -653,47 +804,6 @@ export default function CoursePage() {
 
 // ---------- Subcomponents ----------
 
-function DualBlock({ title, issues, strengths }: { title: string; issues: string[]; strengths: string[] }) {
-  if (issues.length === 0 && strengths.length === 0) return null;
-  return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6">
-      <h3 className="text-base font-bold text-blue-800 mb-3">{title}</h3>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <div className="text-xs font-bold text-red-700 uppercase tracking-wide mb-2">Что улучшить</div>
-          {issues.length === 0 ? (
-            <p className="text-sm text-slate-400 italic">— нет замечаний —</p>
-          ) : (
-            <ul className="space-y-1.5">
-              {issues.map((s, i) => (
-                <li key={i} className="text-sm text-slate-700 flex gap-2">
-                  <span className="text-red-500 flex-shrink-0">•</span>
-                  <span>{s}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <div>
-          <div className="text-xs font-bold text-emerald-700 uppercase tracking-wide mb-2">Сильные стороны</div>
-          {strengths.length === 0 ? (
-            <p className="text-sm text-slate-400 italic">— не выделено —</p>
-          ) : (
-            <ul className="space-y-1.5">
-              {strengths.map((s, i) => (
-                <li key={i} className="text-sm text-slate-700 flex gap-2">
-                  <span className="text-emerald-500 flex-shrink-0">•</span>
-                  <span>{s}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function FilterPill({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button onClick={onClick}
@@ -711,7 +821,7 @@ function Header({ onLogout }: { onLogout?: () => void }) {
       <div className="max-w-3xl mx-auto px-6 py-5 flex justify-between items-center">
         <div>
           <h1 className="text-xl font-bold">Курсовая работа</h1>
-          <p className="text-xs opacity-75 mt-0.5">Интеллектуальный помощник по улучшению курсовой</p>
+          <p className="text-xs opacity-75 mt-0.5">ИИ-консультант по курсовым работам</p>
         </div>
         <nav className="flex gap-1 print:hidden">
           <Link href="/" className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition">

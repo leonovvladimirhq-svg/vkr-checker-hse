@@ -4,12 +4,26 @@
 
 import mammoth from 'mammoth';
 
+export interface VolumeBreakdown {
+  titlePageDetected: boolean;
+  introFound: boolean;
+  biblioFound: boolean;
+  appendixFound: boolean;
+}
+
 export interface ParsedDocument {
   text: string;         // Полный текст
   html: string;         // HTML-версия (для .docx)
   headings: string[];   // Найденные заголовки
   wordCount: number;
   pageEstimate: number; // Оценка количества страниц (~250 слов = 1 страница)
+  // Объём «тела работы» — без титульника, оглавления, списка литературы и приложений.
+  // Используется для проверки порога ≥90 000 знаков с пробелами по Программе практики 2025.
+  bodyWordCount: number;
+  bodyCharCountWithSpaces: number;
+  bodyCharCountNoSpaces: number;
+  appendixWordCount: number;
+  volumeBreakdown: VolumeBreakdown;
 }
 
 /**
@@ -38,7 +52,20 @@ export async function parseDocx(buffer: Buffer): Promise<ParsedDocument> {
   const wordCount = words.length;
   const pageEstimate = Math.ceil(wordCount / 250);
 
-  return { text, html, headings, wordCount, pageEstimate };
+  const volume = computeBodyVolume(text);
+
+  return {
+    text,
+    html,
+    headings,
+    wordCount,
+    pageEstimate,
+    bodyWordCount: volume.bodyWordCount,
+    bodyCharCountWithSpaces: volume.bodyCharCountWithSpaces,
+    bodyCharCountNoSpaces: volume.bodyCharCountNoSpaces,
+    appendixWordCount: volume.appendixWordCount,
+    volumeBreakdown: volume.breakdown,
+  };
 }
 
 /**
@@ -60,12 +87,19 @@ export async function parsePdf(buffer: Buffer): Promise<ParsedDocument> {
     return line.length > 3 && line.length < 100 && !line.endsWith('.') && /^[A-ZА-ЯЁ]/.test(line);
   }).slice(0, 50); // Ограничиваем 50 заголовками
 
+  const volume = computeBodyVolume(text);
+
   return {
     text,
     html: '', // PDF не даёт HTML
     headings,
     wordCount,
     pageEstimate: data.numpages || Math.ceil(wordCount / 250),
+    bodyWordCount: volume.bodyWordCount,
+    bodyCharCountWithSpaces: volume.bodyCharCountWithSpaces,
+    bodyCharCountNoSpaces: volume.bodyCharCountNoSpaces,
+    appendixWordCount: volume.appendixWordCount,
+    volumeBreakdown: volume.breakdown,
   };
 }
 
@@ -95,4 +129,89 @@ export function prepareTextForGPT(text: string, maxChars: number = 60000): strin
   return text.substring(0, halfMax) +
     '\n\n[... ПРОПУЩЕНА СРЕДНЯЯ ЧАСТЬ ДОКУМЕНТА ...]\n\n' +
     text.substring(text.length - halfMax);
+}
+
+// ============================================================
+// Вычисление объёма «тела работы»
+// ============================================================
+
+interface BodyVolumeResult {
+  bodyWordCount: number;
+  bodyCharCountWithSpaces: number;
+  bodyCharCountNoSpaces: number;
+  appendixWordCount: number;
+  breakdown: VolumeBreakdown;
+}
+
+/**
+ * Находит границы «тела работы»: от «Введение» до «Список литературы».
+ * Всё после «Приложение» считается приложениями и из тела вычитается.
+ *
+ * Если границы не найдены — возвращает весь текст как тело (fallback).
+ * Возвращает body-объёмы в трёх метриках (слова / знаки с пробелами / знаки без пробелов),
+ * объём приложений отдельно и флаги «что удалось распознать».
+ */
+export function computeBodyVolume(text: string): BodyVolumeResult {
+  const breakdown: VolumeBreakdown = {
+    titlePageDetected: false,
+    introFound: false,
+    biblioFound: false,
+    appendixFound: false,
+  };
+
+  // Эвристика титульного листа: упоминание «Высшая школа экономики» / «Магистерская» в первых ~2000 символов
+  const head = text.substring(0, 2000);
+  if (/высшая школа экономики|национальный исследовательский университет|магистерская/i.test(head)) {
+    breakdown.titlePageDetected = true;
+  }
+
+  // Регексы маркеров разделов — гибкие (учитываем кавычки, переносы, регистр)
+  const introRe = /(^|\n)\s*(введение)\s*\n/i;
+  const biblioRe = /(^|\n)\s*(список\s+(использованных\s+)?(литературы|источников(\s+и\s+литературы)?)|библиограф\w+|список\s+литературы)\s*\n/i;
+  const appendixRe = /(^|\n)\s*(приложения?|приложение\s+[№a-zа-я0-9])\s*(\n|$)/i;
+
+  const introMatch = text.match(introRe);
+  const biblioMatch = text.match(biblioRe);
+  const appendixMatch = text.match(appendixRe);
+
+  breakdown.introFound = !!introMatch;
+  breakdown.biblioFound = !!biblioMatch;
+  breakdown.appendixFound = !!appendixMatch;
+
+  // Начало тела = позиция «Введение» (если есть), иначе — после титульника (~2000 символов), иначе — 0
+  let bodyStart = 0;
+  if (introMatch && introMatch.index !== undefined) {
+    bodyStart = introMatch.index;
+  } else if (breakdown.titlePageDetected) {
+    bodyStart = 2000;
+  }
+
+  // Конец тела = позиция «Список литературы» (если есть), иначе — позиция «Приложение» (если есть), иначе — конец текста
+  let bodyEnd = text.length;
+  if (biblioMatch && biblioMatch.index !== undefined && biblioMatch.index > bodyStart) {
+    bodyEnd = biblioMatch.index;
+  } else if (appendixMatch && appendixMatch.index !== undefined && appendixMatch.index > bodyStart) {
+    bodyEnd = appendixMatch.index;
+  }
+
+  const bodyText = text.substring(bodyStart, bodyEnd);
+  const bodyWords = bodyText.split(/\s+/).filter(w => w.length > 0);
+  const bodyWordCount = bodyWords.length;
+  const bodyCharCountWithSpaces = bodyText.length;
+  const bodyCharCountNoSpaces = bodyText.replace(/\s+/g, '').length;
+
+  // Приложения — всё, что после «Приложение»
+  let appendixWordCount = 0;
+  if (appendixMatch && appendixMatch.index !== undefined) {
+    const appendixText = text.substring(appendixMatch.index);
+    appendixWordCount = appendixText.split(/\s+/).filter(w => w.length > 0).length;
+  }
+
+  return {
+    bodyWordCount,
+    bodyCharCountWithSpaces,
+    bodyCharCountNoSpaces,
+    appendixWordCount,
+    breakdown,
+  };
 }

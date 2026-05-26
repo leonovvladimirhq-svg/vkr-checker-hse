@@ -9,6 +9,7 @@ import type { CourseType } from './methodology';
 import { getMethodologyForCourse } from './methodology';
 import type { ParsedDocument } from './parser';
 import { prepareTextForGPT } from './parser';
+import type { DbAnalysisResult } from './db-analyzer';
 import {
   ReviewTemplateData,
   DEFAULT_BD_CRITERIA,
@@ -22,19 +23,31 @@ function buildPrompt(
   doc: ParsedDocument,
   studentName: string,
   workTitle: string,
+  dbAnalysis?: DbAnalysisResult | null,
 ): { system: string; user: string } {
   const methodology = getMethodologyForCourse(type);
   const workCriteria = type === 'research' ? RESEARCH_WORK_CRITERIA : PROJECT_WORK_CRITERIA;
-  const charCount = doc.text.length;
 
-  const system = `Ты — опытный научный руководитель ОП «Интегрированные коммуникации» НИУ ВШЭ. Тебе поручено заполнить официальный шаблон отзыва на ${type === 'research' ? 'исследовательскую курсовую работу' : 'курсовой проект'} студента.
+  // ----- Блок с фактическим содержимым БД (если есть) -----
+  const dbBlock = dbAnalysis?.accessible && dbAnalysis.description
+    ? `\n\nСОДЕРЖИМОЕ БАЗЫ ДАННЫХ (Яндекс.Диск):\n${dbAnalysis.description}\n\nИспользуй эти данные для заполнения bdAudioCount / bdTablesCount / bdOtherCount (конкретные числа, а не null) и для содержательных комментариев в bdCriteria.`
+    : dbAnalysis && !dbAnalysis.accessible
+      ? `\n\nБАЗА ДАННЫХ: ссылка передана, но недоступна (${dbAnalysis.error || 'неизвестная причина'}). Поставь счётчики в null, в bdCriteria комментарии — «Не удалось проверить автоматически; рекомендуется ручная проверка научным руководителем».`
+      : `\n\nБАЗА ДАННЫХ: ссылка не была передана. Поставь bdAudioCount / bdTablesCount / bdOtherCount = null. В bdCriteria комментарии — «Не проверялось автоматически; рекомендуется ручная проверка научным руководителем».`;
 
-Соблюдай:
-- Строгое соответствие шаблону Приложения 20.${type === 'research' ? '1' : '2'} Программы практики 2025.
+  const system = `Ты помогаешь научному руководителю заполнить шаблон отзыва на ${type === 'research' ? 'исследовательскую курсовую работу' : 'курсовой проект'} студента ОП «Интегрированные коммуникации» НИУ ВШЭ. Финальный документ подписывает реальный научный руководитель, поэтому твоя задача — корректно подготовить факты и черновики комментариев по шаблону Приложения 20.${type === 'research' ? '1' : '2'} Программы практики 2025.
+
+ВАЖНЫЕ ПРИНЦИПЫ:
 - Уважительный, конструктивный тон. Никаких категоричных и демотивирующих формулировок.
-- Не выдумывай факты о работе — опирайся только на присланный текст.
-- В каждом «Содержательный комментарий по критерию» дай ОБОСНОВАННУЮ оценку (1–3 предложения): что есть в работе по этому критерию, что выполнено хорошо, что стоит усилить.
+- Не выдумывай факты о работе — опирайся только на присланный текст и фактическое содержимое БД (если предоставлено).
+- В каждом «Содержательный комментарий по критерию» дай ОБОСНОВАННУЮ оценку (1–3 предложения): что есть в работе, что выполнено хорошо, что стоит усилить. Формулировки нейтральные — без позиционирования «как руководитель».
 - Оценка по критерию — целое число от 0 до 10 (или «—», если критерий категорически не применим).
+- Если что-то невозможно проверить автоматически (например, корректность цитирования / Антиплагиат, фактический хронометраж аудиозаписей) — так и пиши: «Не удалось проверить автоматически; рекомендуется ручная проверка научным руководителем». Не ставь «ДА/НЕТ», ставь «—».
+
+ОБЪЁМ РАБОТЫ:
+- Используй ТОЧНЫЕ числа из метаданных (bodyCharCountWithSpaces). Не пиши абстрактных оценок «примерно столько-то страниц».
+- Порог допуска: ≥ 90 000 знаков с пробелами для русского / ≥ 85 000 для английского.
+- В volumeRequirementMet: «ДА (N знаков с пробелами, порог 90 000)» или «НЕТ (N знаков с пробелами, требуется не менее 90 000)».
 
 МЕТОДИЧЕСКИЕ МАТЕРИАЛЫ (опирайся на них при заполнении):
 ---
@@ -47,15 +60,17 @@ ${methodology}
   "bdTablesCount": число или null,
   "bdOtherCount": число или null,
   "bdCriteria": [ {"criterion": "...", "yesNo": "ДА|НЕТ|—", "comment": "..."}, ...4 пункта в фиксированном порядке... ],
-  "charCountWithSpaces": число (можно взять из метаданных),
-  "volumeRequirementMet": "ДА / НЕТ (комментарий)",
+  "charCountWithSpaces": число (точный body-объём — bodyCharCountWithSpaces из метаданных),
+  "volumeRequirementMet": "ДА / НЕТ (комментарий с конкретным числом и порогом)",
   "structureRequirementMet": "ДА / НЕТ (какие элементы отсутствуют)",
-  "citationRequirementMet": "ДА / НЕТ / Не проверялось",
+  "citationRequirementMet": "—",
   "aiRequirementOverall": "ДА / НЕТ / Не использовалось",
   "aiCriteria": [ {"criterion": "...", "yesNo": "ДА|НЕТ|—", "comment": "..."}, ...5 пунктов в фиксированном порядке... ],
   "workCriteria": [ {"number": 1, "title": "...", "weight": "0,05", "comment": "...", "score": "8"}, ...${workCriteria.length} пунктов... ],
   "recommendedGrade": "N из 10 (краткое обоснование)"
 }
+
+ПРАВИЛО ПО citationRequirementMet: НЕ ставь «ДА» / «НЕТ» автоматически — поставь «—». В Word-отзыве рядом будет выделенная пометка «Рекомендуется ручная проверка через систему Антиплагиат».
 
 ФИКСИРОВАННЫЙ ПОРЯДОК bdCriteria (повтори ровно эти формулировки):
 ${DEFAULT_BD_CRITERIA.map((c, i) => `${i + 1}. ${c}`).join('\n')}
@@ -72,11 +87,15 @@ ${workCriteria.map(c => `№${c.number} (вес ${c.weight}): ${c.title}`).join(
 Тема работы: ${workTitle}
 Тип работы: ${type === 'research' ? 'Исследовательская курсовая работа (ИКР)' : 'Курсовой проект (КП)'}
 
-Метаданные документа:
-- Общий объём (включая всё): ${charCount.toLocaleString('ru-RU')} знаков с пробелами
-- Слов: ${doc.wordCount.toLocaleString('ru-RU')}
-- Страниц (оценка): ~${doc.pageEstimate}
+ТОЧНЫЕ МЕТАДАННЫЕ ОБЪЁМА (используй для charCountWithSpaces и volumeRequirementMet):
+- bodyCharCountWithSpaces (без титульника/оглавления/списка литературы/приложений): ${doc.bodyCharCountWithSpaces.toLocaleString('ru-RU')} знаков с пробелами
+- bodyCharCountNoSpaces: ${doc.bodyCharCountNoSpaces.toLocaleString('ru-RU')} знаков без пробелов
+- bodyWordCount: ${doc.bodyWordCount.toLocaleString('ru-RU')} слов
+- Объём приложений: ${doc.appendixWordCount.toLocaleString('ru-RU')} слов
+- Распознавание границ: введение = ${doc.volumeBreakdown.introFound ? 'найдено' : 'НЕ найдено'}, список литературы = ${doc.volumeBreakdown.biblioFound ? 'найден' : 'НЕ найден'}, приложения = ${doc.volumeBreakdown.appendixFound ? 'найдено' : 'не найдено'}
+- Общий объём документа (справочно): ${doc.text.length.toLocaleString('ru-RU')} знаков / ${doc.wordCount.toLocaleString('ru-RU')} слов / ~${doc.pageEstimate} стр.
 - Найдено заголовков: ${doc.headings.length} (${doc.headings.slice(0, 30).join(' | ') || '—'})
+${dbBlock}
 
 ТЕКСТ РАБОТЫ:
 ---
@@ -93,6 +112,7 @@ export async function generateReviewFields(
   doc: ParsedDocument,
   studentName: string,
   workTitle: string,
+  dbAnalysis?: DbAnalysisResult | null,
   apiKey?: string,
 ): Promise<ReviewTemplateData> {
   const key = apiKey || process.env.OPENAI_API_KEY;
@@ -100,7 +120,7 @@ export async function generateReviewFields(
 
   const model = process.env.OPENAI_MODEL || 'gpt-5.2';
   const openai = new OpenAI({ apiKey: key });
-  const { system, user } = buildPrompt(type, doc, studentName, workTitle);
+  const { system, user } = buildPrompt(type, doc, studentName, workTitle, dbAnalysis);
 
   const params: any = {
     model,
@@ -128,14 +148,33 @@ export async function generateReviewFields(
   const ai = Array.isArray(raw.aiCriteria) ? raw.aiCriteria : [];
   const work = Array.isArray(raw.workCriteria) ? raw.workCriteria : [];
 
+  // Если GPT не вернул счётчики БД, но у нас есть фактические данные с Яндекс.Диска — берём из dbAnalysis
+  const dbDescription = dbAnalysis?.description || '';
+  const audioFromDb = (dbDescription.match(/Аудиофайлы\s*\((\d+)\)/) || [])[1];
+  const tablesFromDb = (dbDescription.match(/Табличные файлы\s*\((\d+)\)/) || [])[1];
+  const docsFromDb = (dbDescription.match(/Документы\s*\((\d+)\)/) || [])[1];
+  const otherFromDb = (dbDescription.match(/Другие файлы\s*\((\d+)\)/) || [])[1];
+
+  const bdAudioCount = typeof raw.bdAudioCount === 'number'
+    ? raw.bdAudioCount
+    : (audioFromDb ? parseInt(audioFromDb, 10) : null);
+  const bdTablesCount = typeof raw.bdTablesCount === 'number'
+    ? raw.bdTablesCount
+    : (tablesFromDb ? parseInt(tablesFromDb, 10) : null);
+  const bdOtherCount = typeof raw.bdOtherCount === 'number'
+    ? raw.bdOtherCount
+    : ((docsFromDb || otherFromDb)
+        ? (parseInt(docsFromDb || '0', 10) + parseInt(otherFromDb || '0', 10))
+        : null);
+
   return {
     studentFullName: studentName,
     workTitle,
     courseType: type,
 
-    bdAudioCount: typeof raw.bdAudioCount === 'number' ? raw.bdAudioCount : null,
-    bdTablesCount: typeof raw.bdTablesCount === 'number' ? raw.bdTablesCount : null,
-    bdOtherCount: typeof raw.bdOtherCount === 'number' ? raw.bdOtherCount : null,
+    bdAudioCount,
+    bdTablesCount,
+    bdOtherCount,
     bdCriteria: DEFAULT_BD_CRITERIA.map((criterion, i) => ({
       criterion,
       yesNo: (bd[i]?.yesNo as 'ДА' | 'НЕТ' | '—') || '—',
@@ -144,10 +183,10 @@ export async function generateReviewFields(
 
     charCountWithSpaces: typeof raw.charCountWithSpaces === 'number'
       ? raw.charCountWithSpaces
-      : doc.text.length,
+      : doc.bodyCharCountWithSpaces,
     volumeRequirementMet: raw.volumeRequirementMet || '—',
     structureRequirementMet: raw.structureRequirementMet || '—',
-    citationRequirementMet: raw.citationRequirementMet || 'Не проверялось',
+    citationRequirementMet: raw.citationRequirementMet || '—',
     aiRequirementOverall: raw.aiRequirementOverall || 'Не использовалось',
 
     aiCriteria: DEFAULT_AI_CRITERIA.map((criterion, i) => ({

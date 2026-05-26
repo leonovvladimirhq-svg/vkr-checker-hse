@@ -11,6 +11,8 @@ import {
   getCourseAttemptCount,
   insertCourseAttempt,
 } from '@/lib/db-course';
+import { getPublicResourceInfo } from '@/lib/yandex-disk';
+import { analyzeDatabase, DbAnalysisResult } from '@/lib/db-analyzer';
 
 export const maxDuration = 120;
 
@@ -21,10 +23,12 @@ export async function POST(req: NextRequest) {
     const studentNameRaw = formData.get('studentName') as string | null;
     const courseType = formData.get('courseType') as CourseType | null;
     const workTitleRaw = formData.get('workTitle') as string | null;
+    const dbLinkRaw = formData.get('dbLink') as string | null;
     const file = formData.get('file') as File | null;
 
     const studentName = studentNameRaw?.trim() || '';
     const workTitle = workTitleRaw?.trim() || '';
+    const dbLink = dbLinkRaw?.trim() || '';
 
     // --- Валидация ---
     if (!studentName || !courseType || !file) {
@@ -36,6 +40,12 @@ export async function POST(req: NextRequest) {
     if (!workTitle || workTitle.length < 5) {
       return NextResponse.json(
         { error: 'Укажите тему работы (минимум 5 символов)' },
+        { status: 400 }
+      );
+    }
+    if (!dbLink) {
+      return NextResponse.json(
+        { error: 'Укажите ссылку на базу данных (публичная папка Яндекс.Диска)' },
         { status: 400 }
       );
     }
@@ -74,8 +84,25 @@ export async function POST(req: NextRequest) {
     const fileBuffer = Buffer.from(await file.arrayBuffer());
     const doc = await parseDocument(fileBuffer, file.name);
 
+    // --- Анализ базы данных (Яндекс.Диск) ---
+    // Если ссылка нерабочая или Яндекс.Диск отдал ошибку — продолжаем анализ работы,
+    // но передадим в GPT факт недоступности.
+    let dbAnalysis: DbAnalysisResult | null = null;
+    try {
+      const folderInfo = await getPublicResourceInfo(dbLink);
+      dbAnalysis = await analyzeDatabase(dbLink, folderInfo);
+    } catch (err) {
+      console.error('Course DB analysis error (non-critical):', err);
+      dbAnalysis = {
+        accessible: false,
+        description: '',
+        fileCount: 0,
+        error: (err as Error)?.message || 'Не удалось получить информацию по ссылке',
+      };
+    }
+
     // --- Анализ через GPT ---
-    const analysis: CourseAnalysisResult = await analyzeCourseWork(courseType, doc);
+    const analysis: CourseAnalysisResult = await analyzeCourseWork(courseType, doc, dbAnalysis);
 
     // --- Логирование попытки (счётчик загрузок per student, по согласованию — без лимита) ---
     const previousCount = getCourseAttemptCount(studentName);
@@ -96,6 +123,7 @@ export async function POST(req: NextRequest) {
       work_title: workTitle,
       readiness_status: analysis.readinessStatus,
       readiness_text: analysis.readinessStatusText,
+      db_link: dbLink,
     });
 
     return NextResponse.json({
@@ -109,6 +137,8 @@ export async function POST(req: NextRequest) {
         wordCount: doc.wordCount,
         pageEstimate: doc.pageEstimate,
         headingsFound: doc.headings.length,
+        bodyCharCountWithSpaces: doc.bodyCharCountWithSpaces,
+        bodyWordCount: doc.bodyWordCount,
       },
       analysis,
     });

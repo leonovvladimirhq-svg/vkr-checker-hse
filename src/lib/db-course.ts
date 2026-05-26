@@ -42,6 +42,7 @@ function ensureSchema() {
   if (!has('submitted_at'))      safeAlter('ALTER TABLE course_attempts ADD COLUMN submitted_at DATETIME', 'submitted_at');
   if (!has('readiness_status'))  safeAlter('ALTER TABLE course_attempts ADD COLUMN readiness_status TEXT', 'readiness_status');
   if (!has('readiness_text'))    safeAlter('ALTER TABLE course_attempts ADD COLUMN readiness_text TEXT', 'readiness_text');
+  if (!has('db_link'))           safeAlter('ALTER TABLE course_attempts ADD COLUMN db_link TEXT', 'db_link');
 
   initialised = true;
 }
@@ -65,6 +66,7 @@ export interface CourseAttemptRow {
   submitted_at: string | null;
   readiness_status: string | null;
   readiness_text: string | null;
+  db_link: string | null;
 }
 
 export function getCourseAttemptCount(studentName: string): number {
@@ -92,6 +94,7 @@ export function insertCourseAttempt(data: {
   work_title?: string;
   readiness_status?: string;
   readiness_text?: string;
+  db_link?: string;
 }): number {
   ensureSchema();
   const db = getDb();
@@ -99,9 +102,9 @@ export function insertCourseAttempt(data: {
     INSERT INTO course_attempts (
       student_name, course_type, attempt_number, file_name,
       word_count, page_estimate, headings_json, extracted_text_preview,
-      analysis_json, top5_json, work_title, readiness_status, readiness_text
+      analysis_json, top5_json, work_title, readiness_status, readiness_text, db_link
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
     data.student_name,
@@ -117,6 +120,7 @@ export function insertCourseAttempt(data: {
     data.work_title ?? null,
     data.readiness_status ?? null,
     data.readiness_text ?? null,
+    data.db_link ?? null,
   );
   return result.lastInsertRowid as number;
 }
