@@ -11,8 +11,7 @@ import {
   getCourseAttemptCount,
   insertCourseAttempt,
 } from '@/lib/db-course';
-import { getPublicResourceInfo } from '@/lib/yandex-disk';
-import { analyzeDatabase, DbAnalysisResult } from '@/lib/db-analyzer';
+import { analyzeDbWithFallback, DbAnalysisResult } from '@/lib/db-analyzer';
 
 export const maxDuration = 120;
 
@@ -86,20 +85,9 @@ export async function POST(req: NextRequest) {
 
     // --- Анализ базы данных (Яндекс.Диск) ---
     // Если ссылка нерабочая или Яндекс.Диск отдал ошибку — продолжаем анализ работы,
-    // но передадим в GPT факт недоступности.
-    let dbAnalysis: DbAnalysisResult | null = null;
-    try {
-      const folderInfo = await getPublicResourceInfo(dbLink);
-      dbAnalysis = await analyzeDatabase(dbLink, folderInfo);
-    } catch (err) {
-      console.error('Course DB analysis error (non-critical):', err);
-      dbAnalysis = {
-        accessible: false,
-        description: '',
-        fileCount: 0,
-        error: (err as Error)?.message || 'Не удалось получить информацию по ссылке',
-      };
-    }
+    // но передадим в GPT факт недоступности. При недоступной ссылке из формы
+    // пробуем ссылку, найденную в тексте работы (на титульном листе).
+    const dbAnalysis: DbAnalysisResult = await analyzeDbWithFallback(dbLink, doc.text);
 
     // --- Анализ через GPT ---
     const analysis: CourseAnalysisResult = await analyzeCourseWork(courseType, doc, dbAnalysis);

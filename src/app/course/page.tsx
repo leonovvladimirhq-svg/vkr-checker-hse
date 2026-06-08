@@ -39,6 +39,18 @@ interface DatabaseAnalysisSection {
   note: string;
 }
 
+interface EmpiricalSubAnalysis {
+  comment: string;
+  issues: string[];
+  strengths: string[];
+}
+
+interface EmpiricalChapterAnalysis {
+  present: boolean;
+  design: EmpiricalSubAnalysis;
+  analysis: EmpiricalSubAnalysis;
+}
+
 interface CourseAnalysisResult {
   overallSummary: string;
   structuralAnalysis: {
@@ -55,6 +67,7 @@ interface CourseAnalysisResult {
   readinessStatusText: string;
   errorClassification: { structural: number; content: number; formatting: number; ai_usage: number; other: number };
   databaseAnalysis: DatabaseAnalysisSection;
+  empiricalChapter?: EmpiricalChapterAnalysis | null;
   disclaimer: string;
 }
 
@@ -376,7 +389,14 @@ export default function CoursePage() {
                 <>
                   {' '}&middot;{' '}
                   <span className="font-semibold">Тело работы:</span>{' '}
-                  {result.documentInfo.bodyCharCountWithSpaces.toLocaleString('ru-RU')} знаков с пробелами
+                  {result.documentInfo.bodyCharCountWithSpaces.toLocaleString('ru-RU')} знаков с пробелами{' '}
+                  {result.documentInfo.bodyCharCountWithSpaces >= 90000 ? (
+                    <span className="font-semibold text-emerald-700">✅ порог 90 000 пройден</span>
+                  ) : (
+                    <span className="font-semibold text-red-700">
+                      ❌ ниже порога 90 000 (не хватает {(90000 - result.documentInfo.bodyCharCountWithSpaces).toLocaleString('ru-RU')})
+                    </span>
+                  )}
                 </>
               )}
             </div>
@@ -476,6 +496,35 @@ export default function CoursePage() {
                 );
               })}
             </div>
+          </div>
+
+          {/* 5b. Эмпирическая глава: дизайн исследования / анализ данных (два блока) */}
+          {a.empiricalChapter && a.empiricalChapter.present && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6">
+              <h3 className="text-base font-bold text-blue-800 mb-4">Эмпирическая глава — детальный разбор</h3>
+              <div className="grid grid-cols-1 gap-4">
+                <EmpiricalBlock
+                  title="1. Дизайн исследования и инструменты сбора данных"
+                  hint="Обоснование выбора метода, качество анкеты / гайда интервью / протокола, связь с концептуальной частью"
+                  sub={a.empiricalChapter.design}
+                />
+                <EmpiricalBlock
+                  title="2. Анализ и интерпретация данных"
+                  hint="Корректность метода анализа и статистических критериев, обоснованность и подтверждённость выводов"
+                  sub={a.empiricalChapter.analysis}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* 5c. Корректность цитирования / Антиплагиат — критерий недопуска */}
+          <div className="bg-white rounded-xl shadow-sm border border-red-200 p-7 mb-6">
+            <h3 className="text-base font-bold text-red-800 mb-2">Корректность цитирования</h3>
+            <p className="text-sm font-semibold text-red-700 leading-relaxed">
+              ⚠ Соблюдение требований к объёму корректного цитирования — критерий допуска к защите.
+              Автоматически он не проверяется: обязательно проверьте оригинальность работы вручную через
+              систему «Антиплагиат» перед отправкой научному руководителю.
+            </p>
           </div>
 
           {/* 6. Анализ базы данных */}
@@ -811,6 +860,36 @@ function FilterPill({ active, onClick, children }: { active: boolean; onClick: (
         ${active ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-400'}`}>
       {children}
     </button>
+  );
+}
+
+function EmpiricalBlock({ title, hint, sub }: { title: string; hint: string; sub: EmpiricalSubAnalysis }) {
+  return (
+    <div className="border border-slate-200 rounded-lg p-4">
+      <div className="font-semibold text-sm text-slate-800">{title}</div>
+      <div className="text-xs text-slate-400 mb-2">{hint}</div>
+      {sub.comment && (
+        <p className="text-sm text-slate-700 leading-relaxed mb-2">{sub.comment}</p>
+      )}
+      {sub.strengths.length > 0 && (
+        <ul className="space-y-1 mb-2">
+          {sub.strengths.map((s, i) => (
+            <li key={i} className="text-sm text-slate-700 flex gap-2 items-start">
+              <span className="text-emerald-500 flex-shrink-0">•</span><span>{s}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {sub.issues.length > 0 && (
+        <ul className="space-y-1">
+          {sub.issues.map((s, i) => (
+            <li key={i} className="text-sm text-slate-700 flex gap-2 items-start">
+              <span className="text-amber-500 flex-shrink-0">•</span><span>{s}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

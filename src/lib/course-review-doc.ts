@@ -63,8 +63,11 @@ export interface ReviewTemplateData {
   // Характеристика работы — 5 (ИКР) или 6 (КП) строк
   workCriteria: WeightedCriterion[];
 
-  // Рекомендуемая оценка
-  recommendedGrade: string;        // например "7 из 10"
+  // Рекомендуемая оценка — короткая форма для ячейки таблицы (например "7" или "7 из 10")
+  recommendedGrade: string;
+  // Обоснование оценки / общий комментарий — выводится полноширинным абзацем ПОД таблицей
+  // (чтобы текст не сжимался в узкую ячейку оценки).
+  gradeRationale: string;
 }
 
 // ---------- Декларация использования ИИ ----------
@@ -200,6 +203,12 @@ export async function generateReviewDocx(data: ReviewTemplateData): Promise<Buff
   const bdSummary = p(
     `Содержит ${data.bdAudioCount ?? '___'} аудио/видеофайл(ов), ${data.bdTablesCount ?? '___'} таблиц (выгрузка данных опроса), ${data.bdOtherCount ?? '___'} других файлов.`
   );
+  // Если хотя бы один счётчик не заполнен автоматически (___) — сразу под строкой ставим
+  // жирную красную пометку, чтобы преподаватель заполнил числа вручную.
+  const bdCountsMissing = data.bdAudioCount === null || data.bdTablesCount === null || data.bdOtherCount === null;
+  const bdSummaryBadge: Paragraph[] = bdCountsMissing
+    ? [manualCheckBadge('Количество файлов не определено автоматически — рекомендуется ручная проверка и заполнение научным руководителем')]
+    : [];
 
   const bdTable = new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
@@ -303,6 +312,16 @@ export async function generateReviewDocx(data: ReviewTemplateData): Promise<Buff
     ],
   });
 
+  // Обоснование оценки / общий комментарий — полноширинным абзацем ПОД таблицей
+  // (раньше текст сжимался в узкую ячейку оценки и плохо читался).
+  const gradeRationaleBlock: Paragraph[] = data.gradeRationale && data.gradeRationale.trim()
+    ? [
+        p(''),
+        p('Обоснование рекомендуемой оценки:', { bold: true }),
+        p(data.gradeRationale, { align: AlignmentType.JUSTIFIED }),
+      ]
+    : [];
+
   // ===== Подпись =====
   const signatureBlock: Paragraph[] = [
     p(''),
@@ -351,6 +370,7 @@ export async function generateReviewDocx(data: ReviewTemplateData): Promise<Buff
           ...headerBlock,
           bdSectionTitle,
           bdSummary,
+          ...bdSummaryBadge,
           bdTable,
           ...bdBadge,
           ...volumeIntro,
@@ -359,6 +379,7 @@ export async function generateReviewDocx(data: ReviewTemplateData): Promise<Buff
           p(''),
           p('Характеристика работы студента', { bold: true }),
           workTable,
+          ...gradeRationaleBlock,
           ...signatureBlock,
           ...aiDisclaimer,
         ],

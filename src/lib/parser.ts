@@ -119,16 +119,29 @@ export async function parseDocument(buffer: Buffer, filename: string): Promise<P
 }
 
 /**
- * Подготовка текста для отправки в GPT (ограничение размера)
+ * Подготовка текста для отправки в GPT (ограничение размера).
+ *
+ * Лимит по умолчанию — 180 000 символов: типовая курсовая (≥90 000 знаков тела +
+ * титульник, оглавление, список литературы, приложения) укладывается целиком.
+ * Для gpt-4o-mini / gpt-5.x это ~45–65 тыс. токенов входа — приемлемо.
+ *
+ * Если текст всё же длиннее лимита — семплируем ТРИ части (начало + середина + конец),
+ * а не выбрасываем середину целиком. Это критично: исследовательский вопрос, шкалы,
+ * статистические тесты и прочее «мясо» эмпирической главы лежат в середине работы и
+ * раньше не доходили до модели (отсюда галлюцинации «раздел отсутствует»).
  */
-export function prepareTextForGPT(text: string, maxChars: number = 60000): string {
+export function prepareTextForGPT(text: string, maxChars: number = 180000): string {
   if (text.length <= maxChars) return text;
 
-  // Берём начало и конец документа (важно для титульного листа и заключения)
-  const halfMax = Math.floor(maxChars / 2);
-  return text.substring(0, halfMax) +
-    '\n\n[... ПРОПУЩЕНА СРЕДНЯЯ ЧАСТЬ ДОКУМЕНТА ...]\n\n' +
-    text.substring(text.length - halfMax);
+  const GAP = '\n\n[... часть текста пропущена для экономии объёма ...]\n\n';
+  const third = Math.floor(maxChars / 3);
+
+  const head = text.substring(0, third);
+  const midStart = Math.max(third, Math.floor(text.length / 2 - third / 2));
+  const middle = text.substring(midStart, midStart + third);
+  const tail = text.substring(text.length - third);
+
+  return head + GAP + middle + GAP + tail;
 }
 
 // ============================================================

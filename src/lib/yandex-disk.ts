@@ -22,6 +22,20 @@ export interface YaDiskFolderResult {
 const API_BASE = 'https://cloud-api.yandex.net/v1/disk/public/resources';
 const TIMEOUT_MS = 15000;
 
+/**
+ * Извлекает первую публичную ссылку Яндекс.Диска из текста работы (обычно — с титульного листа).
+ * Используется как фолбэк, когда ссылка из формы пустая или недоступна.
+ * Поддерживает disk.yandex.ru/.com, yadi.sk и disk.360.yandex.ru.
+ */
+export function extractYandexDiskUrl(text: string): string | null {
+  if (!text) return null;
+  const re = /https?:\/\/(?:disk\.360\.yandex\.[a-z]+|disk\.yandex\.[a-z]+|yadi\.sk)\/[^\s)<>"'«»]+/i;
+  const m = text.match(re);
+  if (!m) return null;
+  // Обрезаем хвостовую пунктуацию, прилипшую к ссылке в тексте.
+  return m[0].replace(/[.,;]+$/, '');
+}
+
 const MAX_DEPTH = 5;
 const MAX_FILES = 300;          // Лимит файлов — останавливаем обход
 const GLOBAL_TIMEOUT_MS = 60000; // 60 сек на весь рекурсивный обход

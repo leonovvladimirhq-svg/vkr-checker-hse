@@ -10,8 +10,7 @@ import { getCourseAttemptById } from '@/lib/db-course';
 import { parseDocument } from '@/lib/parser';
 import { generateReviewFields } from '@/lib/course-review-prompt';
 import { generateReviewDocx } from '@/lib/course-review-doc';
-import { getPublicResourceInfo } from '@/lib/yandex-disk';
-import { analyzeDatabase, DbAnalysisResult } from '@/lib/db-analyzer';
+import { analyzeDbWithFallback, DbAnalysisResult } from '@/lib/db-analyzer';
 
 export const maxDuration = 300;
 
@@ -45,23 +44,9 @@ export async function POST(req: NextRequest) {
     const fileName = attempt.file_name || `work.${attempt.file_path.endsWith('.pdf') ? 'pdf' : 'docx'}`;
     const doc = await parseDocument(buffer, fileName);
 
-    // Анализ БД (если ссылка сохранена в попытке).
+    // Анализ БД (ссылка из попытки, с фолбэком на ссылку из текста работы).
     // Делаем заново на момент reanalyze — содержимое папки могло поменяться с момента check.
-    let dbAnalysis: DbAnalysisResult | null = null;
-    if (attempt.db_link) {
-      try {
-        const folderInfo = await getPublicResourceInfo(attempt.db_link);
-        dbAnalysis = await analyzeDatabase(attempt.db_link, folderInfo);
-      } catch (err) {
-        console.error('Reanalyze: DB analysis error (non-critical):', err);
-        dbAnalysis = {
-          accessible: false,
-          description: '',
-          fileCount: 0,
-          error: (err as Error)?.message || 'Не удалось получить информацию по ссылке',
-        };
-      }
-    }
+    const dbAnalysis: DbAnalysisResult = await analyzeDbWithFallback(attempt.db_link, doc.text);
 
     // GPT: заполняем поля шаблона
     const fields = await generateReviewFields(

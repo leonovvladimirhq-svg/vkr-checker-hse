@@ -3,7 +3,7 @@
 // Скачивает файлы, парсит xlsx/csv/docx/pdf, формирует описание для GPT
 // ============================================================
 
-import { YaDiskFileInfo, YaDiskFolderResult, downloadPublicFile } from './yandex-disk';
+import { YaDiskFileInfo, YaDiskFolderResult, downloadPublicFile, getPublicResourceInfo, extractYandexDiskUrl } from './yandex-disk';
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
 
@@ -12,6 +12,63 @@ export interface DbAnalysisResult {
   description: string;       // Текстовое описание для GPT
   fileCount: number;
   error?: string;
+}
+
+/**
+ * Анализирует БД по ссылке с фолбэком на ссылку из текста работы.
+ *
+ * Сначала пробует ссылку из формы. Если она недоступна (приватная/404/файл вместо папки),
+ * ищет публичную ссылку Яндекс.Диска в тексте работы (обычно на титульном листе) и пробует её.
+ * Возвращает первый доступный результат, иначе — недоступный результат по форменной ссылке.
+ *
+ * @param formLink ссылка из формы / сохранённая в попытке (может быть пустой)
+ * @param docText  полный текст работы для поиска ссылки на титульном листе
+ */
+export async function analyzeDbWithFallback(
+  formLink: string | null | undefined,
+  docText: string,
+): Promise<DbAnalysisResult> {
+  const tryLink = async (link: string): Promise<DbAnalysisResult> => {
+    const folderInfo = await getPublicResourceInfo(link);
+    return analyzeDatabase(link, folderInfo);
+  };
+
+  let result: DbAnalysisResult = {
+    accessible: false,
+    description: '',
+    fileCount: 0,
+    error: 'Ссылка на базу данных не указана',
+  };
+
+  if (formLink) {
+    try {
+      result = await tryLink(formLink);
+    } catch (err) {
+      result = {
+        accessible: false,
+        description: '',
+        fileCount: 0,
+        error: (err as Error)?.message || 'Не удалось получить информацию по ссылке',
+      };
+    }
+    if (result.accessible) return result;
+  }
+
+  // Фолбэк: ссылка из текста работы (титульный лист).
+  const docLink = extractYandexDiskUrl(docText);
+  if (docLink && docLink !== formLink) {
+    try {
+      const alt = await tryLink(docLink);
+      if (alt.accessible) {
+        alt.description = `(Ссылка из формы недоступна — использована ссылка на базу данных из текста работы.)\n${alt.description}`;
+        return alt;
+      }
+    } catch {
+      // оставляем исходный недоступный результат
+    }
+  }
+
+  return result;
 }
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 МБ
