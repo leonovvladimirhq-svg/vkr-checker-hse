@@ -371,15 +371,15 @@ function buildUserPrompt(
 
   // Блок с точным объёмом тела работы
   const breakdown = doc.volumeBreakdown;
-  const volumeBlock = `ТОЧНЫЙ ОБЪЁМ ТЕЛА РАБОТЫ (без титульника, оглавления, списка литературы и приложений):
-- Знаков с пробелами: ${doc.bodyCharCountWithSpaces.toLocaleString('ru-RU')} (порог допуска ${charThreshold.toLocaleString('ru-RU')})
-- Знаков без пробелов: ${doc.bodyCharCountNoSpaces.toLocaleString('ru-RU')}
-- Слов: ${doc.bodyWordCount.toLocaleString('ru-RU')}
-- Объём приложений (для информации): ${doc.appendixWordCount.toLocaleString('ru-RU')} слов
+  const volumeBlock = `ТОЧНЫЙ ОБЪЁМ ТЕЛА РАБОТЫ (без титульника, оглавления, списка литературы и приложений; числа — сырые целые, не меняй их разрядность):
+- Знаков с пробелами: ${doc.bodyCharCountWithSpaces} (порог допуска ${charThreshold})
+- Знаков без пробелов: ${doc.bodyCharCountNoSpaces}
+- Слов: ${doc.bodyWordCount}
+- Объём приложений (для информации): ${doc.appendixWordCount} слов
 - Распознанные границы: титульник = ${breakdown.titlePageDetected ? 'да' : 'нет'}, «Введение» = ${breakdown.introFound ? 'найдено' : 'НЕ найдено'}, «Список литературы» = ${breakdown.biblioFound ? 'найден' : 'НЕ найден'}, «Приложение» = ${breakdown.appendixFound ? 'найдено' : 'не найдено'}
-- Общий объём документа (для справки): ${doc.text.length.toLocaleString('ru-RU')} знаков с пробелами / ${doc.wordCount.toLocaleString('ru-RU')} слов
+- Общий объём документа (для справки): ${doc.text.length} знаков с пробелами / ${doc.wordCount} слов
 
-ВАЖНО: При оценке объёма используй ТОЛЬКО bodyCharCountWithSpaces (${doc.bodyCharCountWithSpaces.toLocaleString('ru-RU')} знаков с пробелами). Не делай абстрактных оценок «примерно столько-то страниц» — приводи точное число и сравнивай с порогом ${charThreshold.toLocaleString('ru-RU')}.`;
+ВАЖНО: При оценке объёма используй ТОЛЬКО bodyCharCountWithSpaces (${doc.bodyCharCountWithSpaces} знаков с пробелами). Не делай абстрактных оценок «примерно столько-то страниц» — приводи точное число и сравнивай с порогом ${charThreshold}. Пиши число объёма ровно как дано, не сокращай разряды.`;
 
   // Блок с содержимым БД (если есть)
   const dbBlock = dbAnalysis?.accessible && dbAnalysis.description

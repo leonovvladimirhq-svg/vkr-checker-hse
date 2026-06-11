@@ -51,6 +51,9 @@ export async function GET(req: NextRequest) {
         readinessText: a.readiness_text,
         attemptNumber: a.attempt_number,
         hasFile: !!a.file_path,
+        source: a.source || 'student',
+        hasTeacherReview: !!a.teacher_review_path,
+        checkerGrade: a.checker_grade || null,
       })),
       total: list.length,
     });

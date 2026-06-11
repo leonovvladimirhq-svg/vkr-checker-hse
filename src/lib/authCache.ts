@@ -51,3 +51,56 @@ export function clearAuth(role: AuthRole): void {
     window.localStorage.removeItem(storageKey(role));
   } catch {}
 }
+
+// ============================================================
+// Кэш пароля упрощённого преподавательского флоу в модуле курсовых
+// («Я преподаватель / Проанализировать»). TTL 25 минут, привязка к ПК
+// (localStorage браузера). Ключ отдельный от основной авторизации.
+// ============================================================
+
+const COURSE_TEACHER_TTL_MS = 25 * 60 * 1000; // 25 минут
+const COURSE_TEACHER_KEY = 'vkr-course-teacher';
+
+interface CourseTeacherRecord {
+  expiresAt: number;
+  pwd: string; // введённый пароль — нужен, чтобы слать на сервер после перезагрузки (не хранится в бандле)
+}
+
+/** Запомнить успешный ввод пароля преподавателя на 25 минут (с самим паролем для повторных запросов). */
+export function saveCourseTeacher(password: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const rec: CourseTeacherRecord = { expiresAt: Date.now() + COURSE_TEACHER_TTL_MS, pwd: password };
+    window.localStorage.setItem(COURSE_TEACHER_KEY, JSON.stringify(rec));
+  } catch {}
+}
+
+/** Действующий пароль преподавателя из кэша (или null, если кэш истёк/пуст). */
+export function getCourseTeacherPassword(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(COURSE_TEACHER_KEY);
+    if (!raw) return null;
+    const rec = JSON.parse(raw) as CourseTeacherRecord;
+    if (!rec || typeof rec.expiresAt !== 'number' || Date.now() > rec.expiresAt || !rec.pwd) {
+      window.localStorage.removeItem(COURSE_TEACHER_KEY);
+      return null;
+    }
+    return rec.pwd;
+  } catch {
+    return null;
+  }
+}
+
+/** Действует ли кэш пароля преподавателя (в пределах 25 минут). */
+export function readCourseTeacher(): boolean {
+  return getCourseTeacherPassword() !== null;
+}
+
+/** Сбросить режим преподавателя (вернуться в студенческий режим). */
+export function clearCourseTeacher(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(COURSE_TEACHER_KEY);
+  } catch {}
+}

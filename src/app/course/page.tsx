@@ -2,7 +2,9 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import Link from 'next/link';
-import { saveAuth, readAuth, clearAuth } from '@/lib/authCache';
+import { saveAuth, readAuth, clearAuth, saveCourseTeacher, readCourseTeacher, getCourseTeacherPassword, clearCourseTeacher } from '@/lib/authCache';
+
+const TEACHER_PASSWORD = 'proverkahse';
 
 // ---------- Типы (зеркалят CourseAnalysisResult из server) ----------
 
@@ -131,6 +133,14 @@ export default function CoursePage() {
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
+  // --- Режим преподавателя «Я преподаватель / Проанализировать» ---
+  const [teacherMode, setTeacherMode] = useState(false);
+  const [teacherModalOpen, setTeacherModalOpen] = useState(false);
+  const [teacherPwInput, setTeacherPwInput] = useState('');
+  const [teacherPwError, setTeacherPwError] = useState('');
+  const [downloadingReview, setDownloadingReview] = useState(false);
+  const [reviewError, setReviewError] = useState('');
+
   // --- Состояние проверки ---
   const [loading, setLoading] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState('');
@@ -144,7 +154,26 @@ export default function CoursePage() {
 
   useEffect(() => {
     if (readAuth('student')) setAuthenticated(true);
+    if (readCourseTeacher()) setTeacherMode(true);
   }, []);
+
+  // --- Режим преподавателя ---
+  const confirmTeacherPassword = () => {
+    if (teacherPwInput === TEACHER_PASSWORD) {
+      saveCourseTeacher(teacherPwInput);
+      setTeacherMode(true);
+      setTeacherModalOpen(false);
+      setTeacherPwInput('');
+      setTeacherPwError('');
+    } else {
+      setTeacherPwError('Неверный пароль');
+    }
+  };
+
+  const exitTeacherMode = () => {
+    clearCourseTeacher();
+    setTeacherMode(false);
+  };
 
   const handleLogin = () => {
     if (loginInput === 'student' && passwordInput === 'hse2025') {
@@ -209,6 +238,10 @@ export default function CoursePage() {
       formData.append('courseType', courseType);
       formData.append('dbLink', dbLink.trim());
       formData.append('file', file);
+      if (teacherMode) {
+        formData.append('mode', 'teacher');
+        formData.append('teacherPassword', getCourseTeacherPassword() || '');
+      }
 
       setLoadingProgress(30);
       setLoadingStatus('Извлечение текста...');
@@ -271,6 +304,43 @@ export default function CoursePage() {
       setSubmitError(err.message || 'Не удалось отправить работу преподавателю');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // --- Скачивание Word-отзыва (режим преподавателя) ---
+  const downloadReview = async () => {
+    if (!result) return;
+    setDownloadingReview(true);
+    setReviewError('');
+    try {
+      const res = await fetch('/api/course/reanalyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: result.attemptId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Ошибка сервера: ${res.status}`);
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get('Content-Disposition') || '';
+      let filename = `Отзыв_${result.studentName}.docx`;
+      const star = cd.match(/filename\*=UTF-8''([^;]+)/i);
+      const plain = cd.match(/filename="([^"]+)"/i);
+      if (star) filename = decodeURIComponent(star[1]);
+      else if (plain) filename = decodeURIComponent(plain[1]);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setReviewError(err.message || 'Не удалось сгенерировать Word-отзыв');
+    } finally {
+      setDownloadingReview(false);
     }
   };
 
@@ -654,7 +724,26 @@ export default function CoursePage() {
             )}
           </div>
 
-          {/* Блок отправки преподавателю */}
+          {/* Режим преподавателя: скачать готовый Word-отзыв */}
+          {teacherMode && (
+            <div className="bg-white rounded-xl shadow-sm border border-violet-200 p-7 mb-6 print:hidden">
+              <h3 className="text-base font-bold text-violet-800 mb-2">Готовый отзыв преподавателя</h3>
+              <p className="text-sm text-slate-600 mb-4">
+                Сгенерируйте и скачайте Word-отзыв по шаблону Программы практики. Работа уже сохранена в
+                сводной таблице преподавателя — туда позже можно загрузить подписанный итоговый отзыв.
+              </p>
+              {reviewError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-2.5 mb-3 text-sm">{reviewError}</div>
+              )}
+              <button onClick={downloadReview} disabled={downloadingReview}
+                className="px-6 py-3 rounded-lg text-sm font-semibold bg-violet-600 text-white hover:bg-violet-700 disabled:bg-slate-300 transition">
+                {downloadingReview ? 'Генерируем отзыв…' : '📄 Скачать Word-отзыв'}
+              </button>
+            </div>
+          )}
+
+          {/* Блок отправки преподавателю (только студенческий режим) */}
+          {!teacherMode && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6 print:hidden">
             <h3 className="text-base font-bold text-blue-800 mb-2">Готовы отправить работу преподавателю?</h3>
             <p className="text-sm text-slate-600 mb-4">
@@ -681,6 +770,7 @@ export default function CoursePage() {
               </button>
             )}
           </div>
+          )}
 
           {/* Оверлей при отправке */}
           {submitting && (
@@ -733,12 +823,58 @@ export default function CoursePage() {
         </div>
       )}
 
+      {/* Модалка пароля преподавателя */}
+      {teacherModalOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-7">
+            <h3 className="text-lg font-bold text-violet-800 mb-1">Вход для преподавателя</h3>
+            <p className="text-xs text-slate-500 mb-4">Введите пароль преподавателя. Доступ сохранится на 25 минут на этом компьютере.</p>
+            {teacherPwError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-2.5 mb-3 text-sm">{teacherPwError}</div>
+            )}
+            <input type="password" value={teacherPwInput}
+              onChange={e => setTeacherPwInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && confirmTeacherPassword()}
+              placeholder="Пароль преподавателя"
+              className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-100 mb-4" />
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => { setTeacherModalOpen(false); setTeacherPwInput(''); setTeacherPwError(''); }}
+                className="px-4 py-2 rounded-lg text-sm font-semibold bg-slate-100 hover:bg-slate-200">Отмена</button>
+              <button onClick={confirmTeacherPassword}
+                className="px-4 py-2 rounded-lg text-sm font-semibold bg-violet-600 text-white hover:bg-violet-700">Войти</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <main className="max-w-3xl mx-auto px-6 py-8">
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 mb-6 text-sm">
             {error}
           </div>
         )}
+
+        {/* Переключатель режима преподавателя */}
+        <div className="mb-6 flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-xl px-5 py-3 flex-wrap">
+          <div className="text-sm">
+            {teacherMode ? (
+              <span className="font-semibold text-violet-700">👩‍🏫 Режим преподавателя — после анализа доступно скачивание готового Word-отзыва</span>
+            ) : (
+              <span className="text-slate-600">Вы преподаватель? Получите готовый Word-отзыв сразу, без отправки работы.</span>
+            )}
+          </div>
+          {teacherMode ? (
+            <button onClick={exitTeacherMode}
+              className="text-xs px-3 py-1.5 rounded-md border border-slate-200 hover:bg-slate-100">
+              Выйти из режима преподавателя
+            </button>
+          ) : (
+            <button onClick={() => { setTeacherModalOpen(true); setTeacherPwError(''); setTeacherPwInput(''); }}
+              className="text-xs px-3 py-1.5 rounded-md bg-violet-100 text-violet-800 border border-violet-200 hover:bg-violet-200 font-semibold">
+              Я преподаватель
+            </button>
+          )}
+        </div>
 
         {/* Информационный блок */}
         <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4 mb-6 text-sm text-blue-900 leading-relaxed">

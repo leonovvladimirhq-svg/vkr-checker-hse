@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
-import { getCourseAttemptById } from '@/lib/db-course';
+import { getCourseAttemptById, setCourseCheckerGrade } from '@/lib/db-course';
 import { parseDocument } from '@/lib/parser';
 import { generateReviewFields } from '@/lib/course-review-prompt';
 import { generateReviewDocx } from '@/lib/course-review-doc';
@@ -56,6 +56,9 @@ export async function POST(req: NextRequest) {
       attempt.work_title || '— тема не указана —',
       dbAnalysis,
     );
+
+    // Сохраняем рекомендованную чекером оценку — чтобы позже сравнить с финальной оценкой преподавателя.
+    setCourseCheckerGrade(id, fields.recommendedGrade || '—', fields.gradeRationale || '');
 
     // Рендерим Word
     const docBuffer = await generateReviewDocx(fields);

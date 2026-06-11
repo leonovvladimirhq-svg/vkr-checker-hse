@@ -43,6 +43,12 @@ function ensureSchema() {
   if (!has('readiness_status'))  safeAlter('ALTER TABLE course_attempts ADD COLUMN readiness_status TEXT', 'readiness_status');
   if (!has('readiness_text'))    safeAlter('ALTER TABLE course_attempts ADD COLUMN readiness_text TEXT', 'readiness_text');
   if (!has('db_link'))           safeAlter('ALTER TABLE course_attempts ADD COLUMN db_link TEXT', 'db_link');
+  // --- Итерация 2 (11.06.2026): преподавательский флоу ---
+  if (!has('source'))                       safeAlter("ALTER TABLE course_attempts ADD COLUMN source TEXT DEFAULT 'student'", 'source');
+  if (!has('checker_grade'))                safeAlter('ALTER TABLE course_attempts ADD COLUMN checker_grade TEXT', 'checker_grade');
+  if (!has('checker_grade_rationale'))      safeAlter('ALTER TABLE course_attempts ADD COLUMN checker_grade_rationale TEXT', 'checker_grade_rationale');
+  if (!has('teacher_review_path'))          safeAlter('ALTER TABLE course_attempts ADD COLUMN teacher_review_path TEXT', 'teacher_review_path');
+  if (!has('teacher_review_uploaded_at'))   safeAlter('ALTER TABLE course_attempts ADD COLUMN teacher_review_uploaded_at DATETIME', 'teacher_review_uploaded_at');
 
   initialised = true;
 }
@@ -67,6 +73,12 @@ export interface CourseAttemptRow {
   readiness_status: string | null;
   readiness_text: string | null;
   db_link: string | null;
+  // Итерация 2:
+  source: string | null;                     // 'student' | 'teacher'
+  checker_grade: string | null;              // рекомендованная оценка чекера (для сравнения с преподавателем)
+  checker_grade_rationale: string | null;
+  teacher_review_path: string | null;        // путь к загруженному подписанному итоговому отзыву
+  teacher_review_uploaded_at: string | null;
 }
 
 export function getCourseAttemptCount(studentName: string): number {
@@ -149,7 +161,7 @@ export function getCourseAttemptById(id: number): CourseAttemptRow | undefined {
  */
 export function markCourseAttemptSubmitted(
   id: number,
-  data: { file_path: string; work_title?: string },
+  data: { file_path: string; work_title?: string; source?: 'student' | 'teacher' },
 ): boolean {
   ensureSchema();
   const db = getDb();
@@ -159,9 +171,42 @@ export function markCourseAttemptSubmitted(
     sets.push('work_title = ?');
     vals.push(data.work_title);
   }
+  if (data.source !== undefined) {
+    sets.push('source = ?');
+    vals.push(data.source);
+  }
   vals.push(id);
   const r = db.prepare(`UPDATE course_attempts SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
   return r.changes > 0;
+}
+
+/** Сохраняет рекомендованную чекером оценку (для сравнения с финальной оценкой преподавателя). */
+export function setCourseCheckerGrade(id: number, grade: string, rationale: string): boolean {
+  ensureSchema();
+  const db = getDb();
+  const r = db
+    .prepare('UPDATE course_attempts SET checker_grade = ?, checker_grade_rationale = ? WHERE id = ?')
+    .run(grade, rationale, id);
+  return r.changes > 0;
+}
+
+/** Привязывает загруженный преподавателем подписанный итоговый отзыв к попытке. */
+export function setCourseTeacherReview(id: number, path: string): boolean {
+  ensureSchema();
+  const db = getDb();
+  const r = db
+    .prepare('UPDATE course_attempts SET teacher_review_path = ?, teacher_review_uploaded_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .run(path, id);
+  return r.changes > 0;
+}
+
+/** Записи, к которым преподаватель уже загрузил итоговый отзыв. Для «Выгрузить всех». */
+export function getCourseAttemptsWithTeacherReview(): CourseAttemptRow[] {
+  ensureSchema();
+  const db = getDb();
+  return db
+    .prepare('SELECT * FROM course_attempts WHERE teacher_review_path IS NOT NULL ORDER BY submitted_at DESC')
+    .all() as CourseAttemptRow[];
 }
 
 /**

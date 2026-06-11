@@ -71,6 +71,9 @@ interface CourseSummary {
   readinessText: string | null;
   attemptNumber: number;
   hasFile: boolean;
+  source?: string;
+  hasTeacherReview?: boolean;
+  checkerGrade?: string | null;
 }
 
 interface CourseDetail extends CourseSummary {
@@ -114,6 +117,7 @@ export default function TeacherPage() {
   const [reanalyzingId, setReanalyzingId] = useState<number | null>(null);
   const [courseMsg, setCourseMsg] = useState('');
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [uploadingReviewId, setUploadingReviewId] = useState<number | null>(null);
 
   // Подтверждение удаления
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
@@ -209,6 +213,31 @@ export default function TeacherPage() {
     } finally {
       setReanalyzingId(null);
     }
+  };
+
+  // Загрузка подписанного итогового отзыва преподавателя к конкретной работе
+  const uploadTeacherReview = async (id: number, file: File) => {
+    setUploadingReviewId(id);
+    setCourseMsg('');
+    try {
+      const fd = new FormData();
+      fd.append('attemptId', String(id));
+      fd.append('file', file);
+      const res = await fetch('/api/course/upload-review', { method: 'POST', body: fd });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || `Ошибка ${res.status}`);
+      setCourseMsg('✓ Итоговый отзыв загружен.');
+      await fetchCourseList();
+    } catch (err: any) {
+      setCourseMsg('Ошибка загрузки отзыва: ' + (err.message || err));
+    } finally {
+      setUploadingReviewId(null);
+    }
+  };
+
+  // Выгрузка архива со всеми загруженными итоговыми отзывами
+  const exportAllReviews = () => {
+    window.open('/api/course/export-reviews', '_blank');
   };
 
   const fetchData = async () => {
@@ -716,7 +745,12 @@ export default function TeacherPage() {
                   {courseList.map((c, i) => (
                     <tr key={c.id} className="border-b border-slate-100 hover:bg-slate-50">
                       <td className="py-2 px-2 text-slate-400">{i + 1}</td>
-                      <td className="py-2 px-2 font-medium">{c.studentName}</td>
+                      <td className="py-2 px-2 font-medium">
+                        {c.studentName}
+                        {c.source === 'teacher' && (
+                          <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-200 align-middle">препод.</span>
+                        )}
+                      </td>
                       <td className="py-2 px-2 text-slate-700 max-w-xs truncate" title={c.workTitle || ''}>{c.workTitle || '—'}</td>
                       <td className="py-2 px-2 text-xs text-slate-500">{c.courseType === 'research' ? 'ИКР' : 'КП'}</td>
                       <td className="py-2 px-2 text-xs text-slate-500 whitespace-nowrap">
@@ -743,10 +777,22 @@ export default function TeacherPage() {
                         </button>
                         <button onClick={() => reanalyzeCourse(c.id)}
                           disabled={reanalyzingId === c.id || !c.hasFile}
-                          className="text-xs px-2 py-1 rounded bg-violet-100 text-violet-800 hover:bg-violet-200 disabled:opacity-40"
+                          className="text-xs px-2 py-1 rounded bg-violet-100 text-violet-800 hover:bg-violet-200 disabled:opacity-40 mr-1"
                           title="Повторный анализ через ChatGPT + Word-отзыв по шаблону">
                           {reanalyzingId === c.id ? '⏳ Идёт…' : '🔄 Повторное исследование'}
                         </button>
+                        {c.hasTeacherReview && (
+                          <span className="text-xs px-2 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 mr-1" title="Итоговый отзыв загружен">
+                            ✓ отзыв
+                          </span>
+                        )}
+                        <label
+                          className={`text-xs px-2 py-1 rounded bg-orange-100 text-orange-800 hover:bg-orange-200 cursor-pointer inline-block ${uploadingReviewId === c.id ? 'opacity-50 pointer-events-none' : ''}`}
+                          title="Загрузить подписанный итоговый отзыв (.docx/.pdf)">
+                          {uploadingReviewId === c.id ? '⏳ Загрузка…' : (c.hasTeacherReview ? '📤 Заменить отзыв' : '📤 Загрузить итоговый отзыв')}
+                          <input type="file" accept=".docx,.pdf" className="hidden"
+                            onChange={e => { const f = e.target.files?.[0]; if (f) uploadTeacherReview(c.id, f); e.currentTarget.value = ''; }} />
+                        </label>
                       </td>
                     </tr>
                   ))}
@@ -754,6 +800,16 @@ export default function TeacherPage() {
               </table>
             </div>
           )}
+
+          <div className="mt-5 pt-4 border-t border-slate-100 flex items-center gap-3 flex-wrap">
+            <button onClick={exportAllReviews}
+              className="text-xs px-4 py-2 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 font-semibold">
+              📦 Выгрузить всех
+            </button>
+            <span className="text-xs text-slate-400">
+              Скачивает ZIP со всеми загруженными ИТОГОВЫМИ отзывами преподавателей (имена файлов — ФИО студентов).
+            </span>
+          </div>
         </div>
       </main>
 

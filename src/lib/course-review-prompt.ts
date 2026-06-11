@@ -47,9 +47,8 @@ function buildPrompt(
 - НАЗВАНИЯ РАЗДЕЛОВ: методические рекомендации требуют от студента СОДЕРЖАТЕЛЬНЫХ названий глав и параграфов. НЕ занижай structureRequirementMet и НЕ пиши «раздел отсутствует» только потому, что глава названа содержательно, а не канцелярски («Анализ научной литературы», «Анализ рынка»). Если раздел присутствует по смыслу под содержательным названием — считай требование выполненным. НЕ рекомендуй переименовывать разделы в канонические названия.
 
 ОБЪЁМ РАБОТЫ:
-- Используй ТОЧНЫЕ числа из метаданных (bodyCharCountWithSpaces). Не пиши абстрактных оценок «примерно столько-то страниц».
-- Порог допуска: ≥ 90 000 знаков с пробелами для русского / ≥ 85 000 для английского.
-- В volumeRequirementMet: «ДА (N знаков с пробелами, порог 90 000)» или «НЕТ (N знаков с пробелами, требуется не менее 90 000)».
+- Поля charCountWithSpaces и volumeRequirementMet сервер заполнит сам из точного значения bodyCharCountWithSpaces — можешь вернуть их как есть, они будут перезаписаны. НЕ пересчитывай объём и не сокращай разряды чисел.
+- Порог допуска: 90000 знаков с пробелами для русского / 85000 для английского (целые числа).
 
 МЕТОДИЧЕСКИЕ МАТЕРИАЛЫ (опирайся на них при заполнении):
 ---
@@ -90,13 +89,15 @@ ${workCriteria.map(c => `№${c.number} (вес ${c.weight}): ${c.title}`).join(
 Тема работы: ${workTitle}
 Тип работы: ${type === 'research' ? 'Исследовательская курсовая работа (ИКР)' : 'Курсовой проект (КП)'}
 
-ТОЧНЫЕ МЕТАДАННЫЕ ОБЪЁМА (используй для charCountWithSpaces и volumeRequirementMet):
-- bodyCharCountWithSpaces (без титульника/оглавления/списка литературы/приложений): ${doc.bodyCharCountWithSpaces.toLocaleString('ru-RU')} знаков с пробелами
-- bodyCharCountNoSpaces: ${doc.bodyCharCountNoSpaces.toLocaleString('ru-RU')} знаков без пробелов
-- bodyWordCount: ${doc.bodyWordCount.toLocaleString('ru-RU')} слов
-- Объём приложений: ${doc.appendixWordCount.toLocaleString('ru-RU')} слов
+ТОЧНЫЕ МЕТАДАННЫЕ ОБЪЁМА (числа даны сырыми целыми, без разделителей разрядов — не меняй их порядок):
+- bodyCharCountWithSpaces (без титульника/оглавления/списка литературы/приложений): ${doc.bodyCharCountWithSpaces} знаков с пробелами
+- bodyCharCountNoSpaces: ${doc.bodyCharCountNoSpaces} знаков без пробелов
+- bodyWordCount: ${doc.bodyWordCount} слов
+- Объём приложений: ${doc.appendixWordCount} слов
 - Распознавание границ: введение = ${doc.volumeBreakdown.introFound ? 'найдено' : 'НЕ найдено'}, список литературы = ${doc.volumeBreakdown.biblioFound ? 'найден' : 'НЕ найден'}, приложения = ${doc.volumeBreakdown.appendixFound ? 'найдено' : 'не найдено'}
-- Общий объём документа (справочно): ${doc.text.length.toLocaleString('ru-RU')} знаков / ${doc.wordCount.toLocaleString('ru-RU')} слов / ~${doc.pageEstimate} стр.
+- Общий объём документа (справочно): ${doc.text.length} знаков / ${doc.wordCount} слов / ~${doc.pageEstimate} стр.
+
+ВАЖНО: поля charCountWithSpaces и volumeRequirementMet в Word-отзыве будут заполнены сервером из точного значения bodyCharCountWithSpaces (${doc.bodyCharCountWithSpaces}). Не пересчитывай и не сокращай это число.
 - Найдено заголовков: ${doc.headings.length} (${doc.headings.slice(0, 30).join(' | ') || '—'})
 ${dbBlock}
 
@@ -170,6 +171,19 @@ export async function generateReviewFields(
         ? (parseInt(docsFromDb || '0', 10) + parseInt(otherFromDb || '0', 10))
         : null);
 
+  // --- Объём и вердикт по порогу считаем ДЕТЕРМИНИРОВАННО на сервере ---
+  // (баг ×10: GPT, получив локализованное «93 000» с неразрывным пробелом, ронял порядок.
+  //  Поэтому charCountWithSpaces и volumeRequirementMet берём из точного серверного значения,
+  //  а не из ответа модели.)
+  const bodyChars = doc.bodyCharCountWithSpaces;
+  const cyr = (doc.text.match(/[а-яё]/gi) || []).length;
+  const lat = (doc.text.match(/[a-z]/gi) || []).length;
+  const volumeThreshold = lat > cyr * 1.2 ? 85000 : 90000; // англ. порог 85 000, иначе рус. 90 000
+  const fmtNum = (n: number) => n.toLocaleString('ru-RU');
+  const volumeRequirementMet = bodyChars >= volumeThreshold
+    ? `ДА (${fmtNum(bodyChars)} знаков с пробелами, порог ${fmtNum(volumeThreshold)})`
+    : `НЕТ (${fmtNum(bodyChars)} знаков с пробелами, требуется не менее ${fmtNum(volumeThreshold)})`;
+
   return {
     studentFullName: studentName,
     workTitle,
@@ -184,10 +198,8 @@ export async function generateReviewFields(
       comment: bd[i]?.comment || '',
     })),
 
-    charCountWithSpaces: typeof raw.charCountWithSpaces === 'number'
-      ? raw.charCountWithSpaces
-      : doc.bodyCharCountWithSpaces,
-    volumeRequirementMet: raw.volumeRequirementMet || '—',
+    charCountWithSpaces: bodyChars,
+    volumeRequirementMet,
     structureRequirementMet: raw.structureRequirementMet || '—',
     citationRequirementMet: raw.citationRequirementMet || '—',
     aiRequirementOverall: raw.aiRequirementOverall || 'Не использовалось',

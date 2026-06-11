@@ -4,16 +4,23 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs/promises';
+import path from 'path';
 import { parseDocument } from '@/lib/parser';
 import { analyzeCourseWork, CourseAnalysisResult } from '@/lib/course-analyzer';
 import type { CourseType } from '@/lib/methodology';
 import {
   getCourseAttemptCount,
   insertCourseAttempt,
+  markCourseAttemptSubmitted,
 } from '@/lib/db-course';
 import { analyzeDbWithFallback, DbAnalysisResult } from '@/lib/db-analyzer';
 
 export const maxDuration = 120;
+
+// Пароль упрощённого преподавательского флоу «Я преподаватель» (см. встречу 11.06.2026).
+const TEACHER_PASSWORD = 'proverkahse';
+const UPLOAD_DIR = path.join(process.cwd(), 'data', 'course-uploads');
 
 export async function POST(req: NextRequest) {
   try {
@@ -24,10 +31,21 @@ export async function POST(req: NextRequest) {
     const workTitleRaw = formData.get('workTitle') as string | null;
     const dbLinkRaw = formData.get('dbLink') as string | null;
     const file = formData.get('file') as File | null;
+    const mode = (formData.get('mode') as string | null) || 'student';
+    const teacherPassword = (formData.get('teacherPassword') as string | null) || '';
 
     const studentName = studentNameRaw?.trim() || '';
     const workTitle = workTitleRaw?.trim() || '';
     const dbLink = dbLinkRaw?.trim() || '';
+
+    const isTeacherMode = mode === 'teacher';
+    // Преподавательский флоу защищён паролем (сверяем на сервере, не только в кэше клиента).
+    if (isTeacherMode && teacherPassword !== TEACHER_PASSWORD) {
+      return NextResponse.json(
+        { error: 'Неверный пароль преподавателя' },
+        { status: 401 }
+      );
+    }
 
     // --- Валидация ---
     if (!studentName || !courseType || !file) {
@@ -114,12 +132,28 @@ export async function POST(req: NextRequest) {
       db_link: dbLink,
     });
 
+    // --- Преподавательский флоу: сохраняем файл и помечаем запись (попадает в сводную таблицу) ---
+    // Так преподаватель может сразу сгенерировать Word-отзыв, а позже к этой записи
+    // можно загрузить подписанный итоговый отзыв и выгрузить его в архиве.
+    if (isTeacherMode) {
+      try {
+        await fs.mkdir(UPLOAD_DIR, { recursive: true });
+        const safeExt = ext === 'pdf' ? 'pdf' : 'docx';
+        const filePath = path.join(UPLOAD_DIR, `${attemptId}.${safeExt}`);
+        await fs.writeFile(filePath, fileBuffer);
+        markCourseAttemptSubmitted(attemptId, { file_path: filePath, work_title: workTitle, source: 'teacher' });
+      } catch (err) {
+        console.error('Teacher-mode save error (non-critical):', err);
+      }
+    }
+
     return NextResponse.json({
       attemptId,
       attemptNumber,
       studentName,
       courseType,
       workTitle,
+      teacherMode: isTeacherMode,
       documentInfo: {
         fileName: file.name,
         wordCount: doc.wordCount,
