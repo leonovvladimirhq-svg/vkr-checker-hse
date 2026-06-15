@@ -483,7 +483,11 @@ export default function CoursePage() {
 
             <div className="bg-amber-50 border-2 border-amber-400 rounded-xl px-5 py-3 mt-3 mb-1 flex items-start gap-3">
               <span className="text-amber-500 text-xl flex-shrink-0">⚠️</span>
-              <p className="text-sm font-semibold text-amber-800">{a.disclaimer}</p>
+              <p className="text-sm font-semibold text-amber-800">
+                {teacherMode
+                  ? 'Итоговое решение по работе принимает научный руководитель. ИИ-консультант даёт рекомендации, на что обратить внимание согласно с документами программы, но не является экспертом и может ошибаться.'
+                  : a.disclaimer}
+              </p>
             </div>
 
             <div className="bg-slate-50 rounded-lg p-3 mt-4 text-xs text-slate-600">
@@ -508,8 +512,8 @@ export default function CoursePage() {
             </div>
           </div>
 
-          {/* 1. Готовность к зачёту */}
-          {a.readinessStatusText && (() => {
+          {/* 1. Готовность к зачёту (скрыта в режиме преподавателя — это студенческий показатель) */}
+          {!teacherMode && a.readinessStatusText && (() => {
             const style = READINESS_STYLES[a.readinessStatus] || READINESS_STYLES.right_direction;
             return (
               <div className={`rounded-xl border-2 p-5 mb-6 ${style.bg} ${style.border}`}>
@@ -627,9 +631,9 @@ export default function CoursePage() {
           <div className="bg-white rounded-xl shadow-sm border border-red-200 p-7 mb-6">
             <h3 className="text-base font-bold text-red-800 mb-2">Корректность цитирования</h3>
             <p className="text-sm font-semibold text-red-700 leading-relaxed">
-              ⚠ Соблюдение требований к объёму корректного цитирования — критерий допуска к защите.
-              Автоматически он не проверяется: обязательно проверьте оригинальность работы вручную через
-              систему «Антиплагиат» перед отправкой научному руководителю.
+              {teacherMode
+                ? '⚠ Соблюдение требований к объёму корректного цитирования — критерий допуска к защите. Автоматически он не проверяется: обязательно проверьте оригинальность работы вручную через систему «Антиплагиат».'
+                : '⚠ Соблюдение требований к объёму корректного цитирования — критерий допуска к защите. Автоматически он не проверяется: обязательно проверьте оригинальность работы вручную через систему «Антиплагиат» перед отправкой научному руководителю.'}
             </p>
           </div>
 
@@ -765,8 +769,8 @@ export default function CoursePage() {
             <div className="bg-white rounded-xl shadow-sm border border-violet-200 p-7 mb-6 print:hidden">
               <h3 className="text-base font-bold text-violet-800 mb-2">Готовый отзыв преподавателя</h3>
               <p className="text-sm text-slate-600 mb-4">
-                Сгенерируйте и скачайте Word-отзыв по шаблону Программы практики. Работа уже сохранена в
-                сводной таблице преподавателя — туда позже можно загрузить подписанный итоговый отзыв.
+                Сгенерируйте и скачайте Word-отзыв по шаблону Программы практики. Отзыв нужно выслать
+                учебному офису по почте до 18.06.
               </p>
               {reviewError && (
                 <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-2.5 mb-3 text-sm">{reviewError}</div>
@@ -860,7 +864,7 @@ export default function CoursePage() {
           <div className="flex gap-3 justify-end mt-6 print:hidden">
             <button onClick={exportPDF}
               className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-slate-100 hover:bg-slate-200 border border-slate-200">
-              Скачать PDF
+              {teacherMode ? '📄 Скачать PDF с рекомендациями (эта страница)' : 'Скачать PDF'}
             </button>
             <button onClick={resetForm}
               className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700">
@@ -996,7 +1000,9 @@ export default function CoursePage() {
               maxLength={250}
             />
             <p className="text-xs text-slate-400 mt-1">
-              Тема будет видна преподавателю в сводной таблице (минимум 5 символов).
+              {teacherMode
+                ? 'Тема будет заполнена в черновике отзыва.'
+                : 'Тема будет видна преподавателю в сводной таблице (минимум 5 символов).'}
             </p>
           </div>
           <div>
