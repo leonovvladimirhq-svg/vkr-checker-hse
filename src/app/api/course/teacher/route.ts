@@ -4,7 +4,8 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getSubmittedCourseAttempts, getCourseAttemptById } from '@/lib/db-course';
+import fs from 'fs';
+import { getSubmittedCourseAttempts, getCourseAttemptById, deleteCourseAttempt } from '@/lib/db-course';
 
 export async function GET(req: NextRequest) {
   try {
@@ -32,6 +33,9 @@ export async function GET(req: NextRequest) {
         readinessText: a.readiness_text,
         analysis: a.analysis_json ? JSON.parse(a.analysis_json) : null,
         hasFile: !!a.file_path,
+        feedbackRating: a.feedback_rating || null,
+        feedbackText: a.feedback_text || null,
+        hasFeedback: !!(a.feedback_rating || a.feedback_text),
       });
     }
 
@@ -54,6 +58,9 @@ export async function GET(req: NextRequest) {
         source: a.source || 'student',
         hasTeacherReview: !!a.teacher_review_path,
         checkerGrade: a.checker_grade || null,
+        feedbackRating: a.feedback_rating || null,
+        feedbackText: a.feedback_text || null,
+        hasFeedback: !!(a.feedback_rating || a.feedback_text),
       })),
       total: list.length,
     });
@@ -61,6 +68,38 @@ export async function GET(req: NextRequest) {
     console.error('Course teacher API error:', error);
     return NextResponse.json(
       { error: error?.message || 'Внутренняя ошибка' },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE /api/course/teacher?id=N — удалить попытку курсовой (строку БД + файлы с диска)
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = Number(searchParams.get('id'));
+    if (!id || isNaN(id)) {
+      return NextResponse.json({ error: 'Не указан id' }, { status: 400 });
+    }
+
+    const attempt = getCourseAttemptById(id);
+    if (!attempt) {
+      return NextResponse.json({ error: 'Попытка не найдена' }, { status: 404 });
+    }
+
+    // Удаляем файлы с диска (работа + загруженный итоговый отзыв), если есть.
+    for (const p of [attempt.file_path, attempt.teacher_review_path]) {
+      if (p && fs.existsSync(p)) {
+        try { fs.unlinkSync(p); } catch (e) { console.error('Не удалось удалить файл:', p, e); }
+      }
+    }
+
+    deleteCourseAttempt(id);
+    return NextResponse.json({ ok: true });
+  } catch (error: any) {
+    console.error('Course delete API error:', error);
+    return NextResponse.json(
+      { error: error?.message || 'Ошибка удаления работы' },
       { status: 500 }
     );
   }

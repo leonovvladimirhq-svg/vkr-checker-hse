@@ -74,6 +74,9 @@ interface CourseSummary {
   source?: string;
   hasTeacherReview?: boolean;
   checkerGrade?: string | null;
+  feedbackRating?: string | null;
+  feedbackText?: string | null;
+  hasFeedback?: boolean;
 }
 
 interface CourseDetail extends CourseSummary {
@@ -118,6 +121,8 @@ export default function TeacherPage() {
   const [courseMsg, setCourseMsg] = useState('');
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [uploadingReviewId, setUploadingReviewId] = useState<number | null>(null);
+  const [deletingCourseId, setDeletingCourseId] = useState<number | null>(null);
+  const [feedbackModal, setFeedbackModal] = useState<{ studentName: string; rating: string | null; text: string | null } | null>(null);
 
   // Подтверждение удаления
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
@@ -238,6 +243,24 @@ export default function TeacherPage() {
   // Выгрузка архива со всеми загруженными итоговыми отзывами
   const exportAllReviews = () => {
     window.open('/api/course/export-reviews', '_blank');
+  };
+
+  // Удаление работы курсовой (строка БД + файлы на сервере)
+  const deleteCourseWork = async (c: CourseSummary) => {
+    if (!window.confirm(`Удалить работу «${c.studentName}» безвозвратно? Будут удалены файл работы и загруженный отзыв.`)) return;
+    setDeletingCourseId(c.id);
+    setCourseMsg('');
+    try {
+      const res = await fetch(`/api/course/teacher?id=${c.id}`, { method: 'DELETE' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || `Ошибка ${res.status}`);
+      setCourseMsg('✓ Работа удалена.');
+      await fetchCourseList();
+    } catch (err: any) {
+      setCourseMsg('Ошибка удаления: ' + (err.message || err));
+    } finally {
+      setDeletingCourseId(null);
+    }
   };
 
   const fetchData = async () => {
@@ -787,12 +810,25 @@ export default function TeacherPage() {
                           </span>
                         )}
                         <label
-                          className={`text-xs px-2 py-1 rounded bg-orange-100 text-orange-800 hover:bg-orange-200 cursor-pointer inline-block ${uploadingReviewId === c.id ? 'opacity-50 pointer-events-none' : ''}`}
+                          className={`text-xs px-2 py-1 rounded bg-orange-100 text-orange-800 hover:bg-orange-200 cursor-pointer inline-block mr-1 ${uploadingReviewId === c.id ? 'opacity-50 pointer-events-none' : ''}`}
                           title="Загрузить подписанный итоговый отзыв (.docx/.pdf)">
                           {uploadingReviewId === c.id ? '⏳ Загрузка…' : (c.hasTeacherReview ? '📤 Заменить отзыв' : '📤 Загрузить итоговый отзыв')}
                           <input type="file" accept=".docx,.pdf" className="hidden"
                             onChange={e => { const f = e.target.files?.[0]; if (f) uploadTeacherReview(c.id, f); e.currentTarget.value = ''; }} />
                         </label>
+                        {c.hasFeedback && (
+                          <button onClick={() => setFeedbackModal({ studentName: c.studentName, rating: c.feedbackRating || null, text: c.feedbackText || null })}
+                            className="text-xs px-2 py-1 rounded bg-sky-100 text-sky-800 hover:bg-sky-200 mr-1"
+                            title="Отзыв пользователя о работе сервиса">
+                            {c.feedbackRating === 'like' ? '👍' : c.feedbackRating === 'dislike' ? '👎' : '💬'} Отзыв
+                          </button>
+                        )}
+                        <button onClick={() => deleteCourseWork(c)}
+                          disabled={deletingCourseId === c.id}
+                          className="text-xs px-2 py-1 rounded bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-40"
+                          title="Удалить работу безвозвратно (файл и запись)">
+                          {deletingCourseId === c.id ? '⏳ Удаление…' : '🗑 Удалить'}
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -909,6 +945,17 @@ export default function TeacherPage() {
                 </div>
               )}
 
+              {courseDetail.hasFeedback && (
+                <div className="mb-4 bg-sky-50 border border-sky-200 rounded-lg p-3">
+                  <h3 className="text-sm font-bold text-sky-800 mb-1">
+                    💬 Отзыв о работе сервиса {courseDetail.feedbackRating === 'like' ? '👍' : courseDetail.feedbackRating === 'dislike' ? '👎' : ''}
+                  </h3>
+                  {courseDetail.feedbackText
+                    ? <p className="text-sm text-slate-700 whitespace-pre-line">{courseDetail.feedbackText}</p>
+                    : <p className="text-sm text-slate-500">Без текста — только оценка.</p>}
+                </div>
+              )}
+
               <div className="flex gap-3 mt-6 pt-4 border-t border-slate-200">
                 <button onClick={() => downloadCourseFile(courseDetail.id)}
                   disabled={!courseDetail.hasFile}
@@ -925,6 +972,25 @@ export default function TeacherPage() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Модалка отзыва пользователя о работе сервиса */}
+      {feedbackModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 print:hidden"
+          onClick={(e) => { if (e.target === e.currentTarget) setFeedbackModal(null); }}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <div className="flex justify-between items-start mb-2">
+              <h3 className="text-base font-bold text-sky-800">
+                💬 Отзыв о работе сервиса {feedbackModal.rating === 'like' ? '👍 Полезно' : feedbackModal.rating === 'dislike' ? '👎 Не очень' : ''}
+              </h3>
+              <button onClick={() => setFeedbackModal(null)} className="text-slate-400 hover:text-slate-700 text-2xl leading-none">×</button>
+            </div>
+            <p className="text-xs text-slate-500 mb-3">{feedbackModal.studentName}</p>
+            {feedbackModal.text
+              ? <p className="text-sm text-slate-700 whitespace-pre-line">{feedbackModal.text}</p>
+              : <p className="text-sm text-slate-500">Без текста — пользователь оставил только оценку.</p>}
           </div>
         </div>
       )}

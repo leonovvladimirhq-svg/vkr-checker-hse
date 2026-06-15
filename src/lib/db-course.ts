@@ -49,6 +49,10 @@ function ensureSchema() {
   if (!has('checker_grade_rationale'))      safeAlter('ALTER TABLE course_attempts ADD COLUMN checker_grade_rationale TEXT', 'checker_grade_rationale');
   if (!has('teacher_review_path'))          safeAlter('ALTER TABLE course_attempts ADD COLUMN teacher_review_path TEXT', 'teacher_review_path');
   if (!has('teacher_review_uploaded_at'))   safeAlter('ALTER TABLE course_attempts ADD COLUMN teacher_review_uploaded_at DATETIME', 'teacher_review_uploaded_at');
+  // --- Итерация 3 (06.2026): обратная связь разработчику ---
+  if (!has('feedback_rating'))   safeAlter('ALTER TABLE course_attempts ADD COLUMN feedback_rating TEXT', 'feedback_rating');
+  if (!has('feedback_text'))     safeAlter('ALTER TABLE course_attempts ADD COLUMN feedback_text TEXT', 'feedback_text');
+  if (!has('feedback_at'))       safeAlter('ALTER TABLE course_attempts ADD COLUMN feedback_at DATETIME', 'feedback_at');
 
   initialised = true;
 }
@@ -79,6 +83,10 @@ export interface CourseAttemptRow {
   checker_grade_rationale: string | null;
   teacher_review_path: string | null;        // путь к загруженному подписанному итоговому отзыву
   teacher_review_uploaded_at: string | null;
+  // Итерация 3 — обратная связь о качестве работы сервиса (от студента/преподавателя):
+  feedback_rating: string | null;            // 'like' | 'dislike'
+  feedback_text: string | null;
+  feedback_at: string | null;
 }
 
 export function getCourseAttemptCount(studentName: string): number {
@@ -207,6 +215,24 @@ export function getCourseAttemptsWithTeacherReview(): CourseAttemptRow[] {
   return db
     .prepare('SELECT * FROM course_attempts WHERE teacher_review_path IS NOT NULL ORDER BY submitted_at DESC')
     .all() as CourseAttemptRow[];
+}
+
+/** Сохраняет обратную связь о качестве работы сервиса (текст + лайк/дизлайк). */
+export function setCourseFeedback(id: number, rating: string | null, text: string | null): boolean {
+  ensureSchema();
+  const db = getDb();
+  const r = db
+    .prepare('UPDATE course_attempts SET feedback_rating = ?, feedback_text = ?, feedback_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .run(rating, text, id);
+  return r.changes > 0;
+}
+
+/** Полностью удаляет попытку курсовой (строку БД). Файлы с диска удаляет вызывающий код. */
+export function deleteCourseAttempt(id: number): boolean {
+  ensureSchema();
+  const db = getDb();
+  const r = db.prepare('DELETE FROM course_attempts WHERE id = ?').run(id);
+  return r.changes > 0;
 }
 
 /**

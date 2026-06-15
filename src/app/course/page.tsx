@@ -141,6 +141,13 @@ export default function CoursePage() {
   const [downloadingReview, setDownloadingReview] = useState(false);
   const [reviewError, setReviewError] = useState('');
 
+  // --- Обратная связь разработчику (оценка качества работы сервиса) ---
+  const [feedbackRating, setFeedbackRating] = useState<'like' | 'dislike' | null>(null);
+  const [feedbackText, setFeedbackText] = useState('');
+  const [feedbackSending, setFeedbackSending] = useState(false);
+  const [feedbackSent, setFeedbackSent] = useState(false);
+  const [feedbackError, setFeedbackError] = useState('');
+
   // --- Состояние проверки ---
   const [loading, setLoading] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState('');
@@ -278,6 +285,10 @@ export default function CoursePage() {
     setCategoryFilter('all');
     setSubmitted(false);
     setSubmitError('');
+    setFeedbackRating(null);
+    setFeedbackText('');
+    setFeedbackSent(false);
+    setFeedbackError('');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -341,6 +352,31 @@ export default function CoursePage() {
       setReviewError(err.message || 'Не удалось сгенерировать Word-отзыв');
     } finally {
       setDownloadingReview(false);
+    }
+  };
+
+  // --- Отправка обратной связи разработчику ---
+  const submitFeedback = async () => {
+    if (!result) return;
+    if (!feedbackRating && !feedbackText.trim()) {
+      setFeedbackError('Поставьте оценку или напишите отзыв');
+      return;
+    }
+    setFeedbackSending(true);
+    setFeedbackError('');
+    try {
+      const res = await fetch('/api/course/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attemptId: result.attemptId, rating: feedbackRating, text: feedbackText.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
+      setFeedbackSent(true);
+    } catch (err: any) {
+      setFeedbackError(err.message || 'Не удалось отправить отзыв');
+    } finally {
+      setFeedbackSending(false);
     }
   };
 
@@ -782,6 +818,43 @@ export default function CoursePage() {
               </div>
             </div>
           )}
+
+          {/* Обратная связь разработчику */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6 print:hidden">
+            <h3 className="text-base font-bold text-blue-800 mb-2">💬 Оцените работу сервиса</h3>
+            <p className="text-sm text-slate-600 mb-4">
+              Ваш отзыв поможет улучшить ИИ-консультанта — это обратная связь разработчику о качестве проверки (необязательно).
+            </p>
+            {feedbackSent ? (
+              <div className="bg-emerald-50 border-2 border-emerald-400 text-emerald-800 rounded-lg px-4 py-3 text-sm font-semibold">
+                ✓ Спасибо за отзыв!
+              </div>
+            ) : (
+              <>
+                <div className="flex gap-2 mb-3">
+                  <button onClick={() => setFeedbackRating(feedbackRating === 'like' ? null : 'like')}
+                    className={`px-4 py-2 rounded-lg text-sm font-semibold border transition ${feedbackRating === 'like' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-200 hover:border-emerald-400'}`}>
+                    👍 Полезно
+                  </button>
+                  <button onClick={() => setFeedbackRating(feedbackRating === 'dislike' ? null : 'dislike')}
+                    className={`px-4 py-2 rounded-lg text-sm font-semibold border transition ${feedbackRating === 'dislike' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-slate-600 border-slate-200 hover:border-red-400'}`}>
+                    👎 Не очень
+                  </button>
+                </div>
+                <textarea value={feedbackText} onChange={e => setFeedbackText(e.target.value)}
+                  placeholder="Что понравилось, что можно улучшить? (необязательно)"
+                  rows={3} maxLength={2000}
+                  className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 mb-3" />
+                {feedbackError && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-2.5 mb-3 text-sm">{feedbackError}</div>
+                )}
+                <button onClick={submitFeedback} disabled={feedbackSending}
+                  className="px-6 py-2.5 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:bg-slate-300 transition">
+                  {feedbackSending ? 'Отправляем…' : 'Отправить отзыв'}
+                </button>
+              </>
+            )}
+          </div>
 
           {/* Кнопки */}
           <div className="flex gap-3 justify-end mt-6 print:hidden">
