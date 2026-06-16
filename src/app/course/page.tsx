@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { saveAuth, readAuth, clearAuth, saveCourseTeacher, readCourseTeacher, getCourseTeacherPassword, clearCourseTeacher } from '@/lib/authCache';
+import { parseJsonResponse } from '@/lib/http';
 
 const TEACHER_PASSWORD = 'proverkahse';
 
@@ -266,8 +267,7 @@ export default function CoursePage() {
       setLoadingProgress(90);
       setLoadingStatus('Формирование рекомендаций...');
 
-      const data: CourseCheckResponse = await res.json();
-      if (!res.ok) throw new Error(data.error || `Ошибка сервера: ${res.status}`);
+      const data = await parseJsonResponse<CourseCheckResponse>(res, 'Проверка работы');
 
       setLoadingProgress(100);
       setResult(data);

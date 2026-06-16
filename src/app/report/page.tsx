@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { parseJsonResponse } from '@/lib/http';
 
 interface CheckResultItem {
   id: string;
@@ -54,14 +55,10 @@ export default function ReportPage() {
     setData(null);
     try {
       const res = await fetch(`/api/report?student=${encodeURIComponent(name)}`);
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json.error || 'Ошибка запроса');
-      } else {
-        setData(json);
-      }
-    } catch {
-      setError('Ошибка соединения с сервером');
+      const json = await parseJsonResponse<ReportData>(res, 'Отчёт');
+      setData(json);
+    } catch (err: any) {
+      setError(err?.message || 'Ошибка соединения с сервером');
     }
     setLoading(false);
   };
