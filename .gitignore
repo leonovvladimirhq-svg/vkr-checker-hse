@@ -14,3 +14,9 @@ tsconfig.tsbuildinfo
 # Local-only utilities (load testing and one-off scripts)
 loadtest/
 scripts/
+
+# Server-side backups / local junk
+.env.bak.*
+ecosystem.config.js.bak-*
+data/*.backup-*
+data/vkr.db.backup-*
