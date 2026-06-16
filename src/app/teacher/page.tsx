@@ -779,38 +779,39 @@ export default function TeacherPage() {
                       <td className="py-2 px-2 text-xs text-slate-500 whitespace-nowrap">
                         {c.submittedAt ? new Date(c.submittedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
                       </td>
-                      <td className="py-2 px-2">
+                      <td className="py-2 px-2 align-top min-w-[150px]">
                         {c.readinessStatus ? (
                           <span className={`text-xs px-2 py-1 rounded-md border font-semibold ${READINESS_COLORS[c.readinessStatus] || 'bg-slate-100 text-slate-700 border-slate-300'}`}>
                             {c.readinessText || c.readinessStatus}
                           </span>
                         ) : '—'}
                       </td>
-                      <td className="py-2 px-2 text-right whitespace-nowrap">
+                      <td className="py-2 px-2 align-top">
+                        <div className="flex flex-wrap justify-end gap-1 max-w-[300px] ml-auto">
                         <button onClick={() => openCourseDetail(c.id)}
-                          className="text-xs px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 mr-1"
+                          className="text-xs px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100"
                           title="Посмотреть результаты анализа и рекомендации">
                           👁 Подробнее
                         </button>
                         <button onClick={() => downloadCourseFile(c.id)}
                           disabled={!c.hasFile}
-                          className="text-xs px-2 py-1 rounded bg-slate-100 text-slate-700 hover:bg-slate-200 mr-1 disabled:opacity-40"
+                          className="text-xs px-2 py-1 rounded bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-40"
                           title="Скачать оригинал работы">
                           📥 Скачать
                         </button>
                         <button onClick={() => reanalyzeCourse(c.id)}
                           disabled={reanalyzingId === c.id || !c.hasFile}
-                          className="text-xs px-2 py-1 rounded bg-violet-100 text-violet-800 hover:bg-violet-200 disabled:opacity-40 mr-1"
+                          className="text-xs px-2 py-1 rounded bg-violet-100 text-violet-800 hover:bg-violet-200 disabled:opacity-40"
                           title="Повторный анализ через ChatGPT + Word-отзыв по шаблону">
                           {reanalyzingId === c.id ? '⏳ Идёт…' : '🔄 Повторное исследование'}
                         </button>
                         {c.hasTeacherReview && (
-                          <span className="text-xs px-2 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 mr-1" title="Итоговый отзыв загружен">
+                          <span className="text-xs px-2 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200" title="Итоговый отзыв загружен">
                             ✓ отзыв
                           </span>
                         )}
                         <label
-                          className={`text-xs px-2 py-1 rounded bg-orange-100 text-orange-800 hover:bg-orange-200 cursor-pointer inline-block mr-1 ${uploadingReviewId === c.id ? 'opacity-50 pointer-events-none' : ''}`}
+                          className={`text-xs px-2 py-1 rounded bg-orange-100 text-orange-800 hover:bg-orange-200 cursor-pointer inline-block ${uploadingReviewId === c.id ? 'opacity-50 pointer-events-none' : ''}`}
                           title="Загрузить подписанный итоговый отзыв (.docx/.pdf)">
                           {uploadingReviewId === c.id ? '⏳ Загрузка…' : (c.hasTeacherReview ? '📤 Заменить отзыв' : '📤 Загрузить итоговый отзыв')}
                           <input type="file" accept=".docx,.pdf" className="hidden"
@@ -818,7 +819,7 @@ export default function TeacherPage() {
                         </label>
                         {c.hasFeedback && (
                           <button onClick={() => setFeedbackModal({ studentName: c.studentName, rating: c.feedbackRating || null, text: c.feedbackText || null })}
-                            className="text-xs px-2 py-1 rounded bg-sky-100 text-sky-800 hover:bg-sky-200 mr-1"
+                            className="text-xs px-2 py-1 rounded bg-sky-100 text-sky-800 hover:bg-sky-200"
                             title="Отзыв пользователя о работе сервиса">
                             {c.feedbackRating === 'like' ? '👍' : c.feedbackRating === 'dislike' ? '👎' : '💬'} Отзыв
                           </button>
@@ -829,6 +830,7 @@ export default function TeacherPage() {
                           title="Удалить работу безвозвратно (файл и запись)">
                           {deletingCourseId === c.id ? '⏳ Удаление…' : '🗑 Удалить'}
                         </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
