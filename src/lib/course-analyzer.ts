@@ -372,7 +372,8 @@ function buildUserPrompt(
   // Блок с точным объёмом тела работы
   const breakdown = doc.volumeBreakdown;
   const volumeBlock = `ТОЧНЫЙ ОБЪЁМ ТЕЛА РАБОТЫ (без титульника, оглавления, списка литературы и приложений; числа — сырые целые, не меняй их разрядность):
-- Знаков с пробелами: ${doc.bodyCharCountWithSpaces} (порог допуска ${charThreshold})
+- Знаков с пробелами: ${doc.bodyCharCountWithSpaces} (порог допуска ${charThreshold}; объём УЖЕ включает сноски)
+- Из них сноски: ${doc.footnoteCharCount} знаков (сноски входят в тело работы по Программе практики)
 - Знаков без пробелов: ${doc.bodyCharCountNoSpaces}
 - Слов: ${doc.bodyWordCount}
 - Объём приложений (для информации): ${doc.appendixWordCount} слов

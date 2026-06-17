@@ -161,6 +161,7 @@ export async function POST(req: NextRequest) {
         headingsFound: doc.headings.length,
         bodyCharCountWithSpaces: doc.bodyCharCountWithSpaces,
         bodyWordCount: doc.bodyWordCount,
+        footnoteCharCount: doc.footnoteCharCount,
       },
       analysis,
     });

@@ -90,7 +90,8 @@ ${workCriteria.map(c => `№${c.number} (вес ${c.weight}): ${c.title}`).join(
 Тип работы: ${type === 'research' ? 'Исследовательская курсовая работа (ИКР)' : 'Курсовой проект (КП)'}
 
 ТОЧНЫЕ МЕТАДАННЫЕ ОБЪЁМА (числа даны сырыми целыми, без разделителей разрядов — не меняй их порядок):
-- bodyCharCountWithSpaces (без титульника/оглавления/списка литературы/приложений): ${doc.bodyCharCountWithSpaces} знаков с пробелами
+- bodyCharCountWithSpaces (без титульника/оглавления/списка литературы/приложений, НО со сносками): ${doc.bodyCharCountWithSpaces} знаков с пробелами
+- из них сноски: ${doc.footnoteCharCount} знаков (сноски входят в тело по Программе практики)
 - bodyCharCountNoSpaces: ${doc.bodyCharCountNoSpaces} знаков без пробелов
 - bodyWordCount: ${doc.bodyWordCount} слов
 - Объём приложений: ${doc.appendixWordCount} слов
@@ -181,8 +182,8 @@ export async function generateReviewFields(
   const volumeThreshold = lat > cyr * 1.2 ? 85000 : 90000; // англ. порог 85 000, иначе рус. 90 000
   const fmtNum = (n: number) => n.toLocaleString('ru-RU');
   const volumeRequirementMet = bodyChars >= volumeThreshold
-    ? `ДА (${fmtNum(bodyChars)} знаков с пробелами, порог ${fmtNum(volumeThreshold)})`
-    : `НЕТ (${fmtNum(bodyChars)} знаков с пробелами, требуется не менее ${fmtNum(volumeThreshold)})`;
+    ? `ДА (${fmtNum(bodyChars)} знаков с пробелами с учётом сносок, порог ${fmtNum(volumeThreshold)})`
+    : `НЕТ (${fmtNum(bodyChars)} знаков с пробелами с учётом сносок, требуется не менее ${fmtNum(volumeThreshold)})`;
 
   return {
     studentFullName: studentName,

@@ -87,6 +87,7 @@ interface CourseCheckResponse {
     headingsFound: number;
     bodyCharCountWithSpaces?: number;
     bodyWordCount?: number;
+    footnoteCharCount?: number;
   };
   analysis: CourseAnalysisResult;
   error?: string;
@@ -498,8 +499,11 @@ export default function CoursePage() {
               {typeof result.documentInfo.bodyCharCountWithSpaces === 'number' && (
                 <>
                   {' '}&middot;{' '}
-                  <span className="font-semibold">Тело работы:</span>{' '}
+                  <span className="font-semibold">Тело работы (с учётом сносок):</span>{' '}
                   {result.documentInfo.bodyCharCountWithSpaces.toLocaleString('ru-RU')} знаков с пробелами{' '}
+                  {typeof result.documentInfo.footnoteCharCount === 'number' && result.documentInfo.footnoteCharCount > 0 && (
+                    <span className="text-slate-500">(в т.ч. сноски: {result.documentInfo.footnoteCharCount.toLocaleString('ru-RU')}){' '}</span>
+                  )}
                   {result.documentInfo.bodyCharCountWithSpaces >= 90000 ? (
                     <span className="font-semibold text-emerald-700">✅ порог 90 000 пройден</span>
                   ) : (

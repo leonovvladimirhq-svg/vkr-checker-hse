@@ -3,12 +3,14 @@
 // ============================================================
 
 import mammoth from 'mammoth';
+import JSZip from 'jszip';
 
 export interface VolumeBreakdown {
   titlePageDetected: boolean;
   introFound: boolean;
   biblioFound: boolean;
   appendixFound: boolean;
+  footnotesFound: boolean;
 }
 
 export interface ParsedDocument {
@@ -17,13 +19,54 @@ export interface ParsedDocument {
   headings: string[];   // Найденные заголовки
   wordCount: number;
   pageEstimate: number; // Оценка количества страниц (~250 слов = 1 страница)
-  // Объём «тела работы» — без титульника, оглавления, списка литературы и приложений.
-  // Используется для проверки порога ≥90 000 знаков с пробелами по Программе практики 2025.
+  // Объём «тела работы» — без титульника, оглавления, списка литературы и приложений,
+  // НО СО СНОСКАМИ (по Программе практики сноски входят в тело).
+  // Используется для проверки порога ≥90 000 знаков с пробелами.
   bodyWordCount: number;
   bodyCharCountWithSpaces: number;
   bodyCharCountNoSpaces: number;
   appendixWordCount: number;
+  footnoteCharCount: number; // знаки сносок (с пробелами), уже включены в bodyCharCountWithSpaces
   volumeBreakdown: VolumeBreakdown;
+}
+
+/**
+ * Извлекает текст сносок и концевых сносок из .docx.
+ * mammoth.extractRawText НЕ включает текст сносок (он хранится в word/footnotes.xml
+ * отдельно от тела документа), поэтому объём «тела со сносками» считался заниженным.
+ * Возвращает склеенный текст всех сносок (или '' при ошибке/отсутствии).
+ */
+async function extractDocxNotesText(buffer: Buffer): Promise<string> {
+  try {
+    const zip = await JSZip.loadAsync(buffer);
+    const parts: string[] = [];
+    for (const name of ['word/footnotes.xml', 'word/endnotes.xml']) {
+      const file = zip.file(name);
+      if (!file) continue;
+      const xml = await file.async('string');
+      // Берём текст из всех <w:t>…</w:t> (сепараторные сноски тегов <w:t> не содержат).
+      const matches = xml.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g) || [];
+      for (const m of matches) {
+        const inner = m.replace(/<w:t[^>]*>/, '').replace(/<\/w:t>/, '');
+        parts.push(decodeXmlEntities(inner));
+      }
+    }
+    return parts.join(' ').replace(/\s+/g, ' ').trim();
+  } catch (e) {
+    console.error('extractDocxNotesText failed (non-critical):', e);
+    return '';
+  }
+}
+
+function decodeXmlEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)));
 }
 
 /**
@@ -52,7 +95,9 @@ export async function parseDocx(buffer: Buffer): Promise<ParsedDocument> {
   const wordCount = words.length;
   const pageEstimate = Math.ceil(wordCount / 250);
 
-  const volume = computeBodyVolume(text);
+  // Текст сносок храним отдельно (mammoth его не извлекает) и добавляем к объёму тела.
+  const footnotesText = await extractDocxNotesText(buffer);
+  const volume = computeBodyVolume(text, footnotesText);
 
   return {
     text,
@@ -64,6 +109,7 @@ export async function parseDocx(buffer: Buffer): Promise<ParsedDocument> {
     bodyCharCountWithSpaces: volume.bodyCharCountWithSpaces,
     bodyCharCountNoSpaces: volume.bodyCharCountNoSpaces,
     appendixWordCount: volume.appendixWordCount,
+    footnoteCharCount: volume.footnoteCharCount,
     volumeBreakdown: volume.breakdown,
   };
 }
@@ -87,6 +133,7 @@ export async function parsePdf(buffer: Buffer): Promise<ParsedDocument> {
     return line.length > 3 && line.length < 100 && !line.endsWith('.') && /^[A-ZА-ЯЁ]/.test(line);
   }).slice(0, 50); // Ограничиваем 50 заголовками
 
+  // В PDF сноски идут инлайн внизу страницы и уже попадают в text → отдельно не добавляем.
   const volume = computeBodyVolume(text);
 
   return {
@@ -99,6 +146,7 @@ export async function parsePdf(buffer: Buffer): Promise<ParsedDocument> {
     bodyCharCountWithSpaces: volume.bodyCharCountWithSpaces,
     bodyCharCountNoSpaces: volume.bodyCharCountNoSpaces,
     appendixWordCount: volume.appendixWordCount,
+    footnoteCharCount: volume.footnoteCharCount,
     volumeBreakdown: volume.breakdown,
   };
 }
@@ -153,6 +201,7 @@ interface BodyVolumeResult {
   bodyCharCountWithSpaces: number;
   bodyCharCountNoSpaces: number;
   appendixWordCount: number;
+  footnoteCharCount: number;
   breakdown: VolumeBreakdown;
 }
 
@@ -164,12 +213,13 @@ interface BodyVolumeResult {
  * Возвращает body-объёмы в трёх метриках (слова / знаки с пробелами / знаки без пробелов),
  * объём приложений отдельно и флаги «что удалось распознать».
  */
-export function computeBodyVolume(text: string): BodyVolumeResult {
+export function computeBodyVolume(text: string, footnotesText: string = ''): BodyVolumeResult {
   const breakdown: VolumeBreakdown = {
     titlePageDetected: false,
     introFound: false,
     biblioFound: false,
     appendixFound: false,
+    footnotesFound: false,
   };
 
   // Эвристика титульного листа: упоминание «Высшая школа экономики» / «Магистерская» в первых ~2000 символов
@@ -209,9 +259,17 @@ export function computeBodyVolume(text: string): BodyVolumeResult {
 
   const bodyText = text.substring(bodyStart, bodyEnd);
   const bodyWords = bodyText.split(/\s+/).filter(w => w.length > 0);
-  const bodyWordCount = bodyWords.length;
-  const bodyCharCountWithSpaces = bodyText.length;
-  const bodyCharCountNoSpaces = bodyText.replace(/\s+/g, '').length;
+
+  // Сноски — часть тела работы по Программе практики, но mammoth их не извлекает в text,
+  // поэтому добавляем их объём отдельно (передаётся из parseDocx; для PDF — пусто).
+  const footnoteCharCount = footnotesText.length;
+  const footnoteWordCount = footnotesText.split(/\s+/).filter(w => w.length > 0).length;
+  const footnoteCharNoSpaces = footnotesText.replace(/\s+/g, '').length;
+  breakdown.footnotesFound = footnoteCharCount > 0;
+
+  const bodyWordCount = bodyWords.length + footnoteWordCount;
+  const bodyCharCountWithSpaces = bodyText.length + footnoteCharCount;
+  const bodyCharCountNoSpaces = bodyText.replace(/\s+/g, '').length + footnoteCharNoSpaces;
 
   // Приложения — всё, что после «Приложение»
   let appendixWordCount = 0;
@@ -225,6 +283,7 @@ export function computeBodyVolume(text: string): BodyVolumeResult {
     bodyCharCountWithSpaces,
     bodyCharCountNoSpaces,
     appendixWordCount,
+    footnoteCharCount,
     breakdown,
   };
 }

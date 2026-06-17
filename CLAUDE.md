@@ -292,11 +292,12 @@ pm2 restart vkr-checker
 - `disclaimer` — фикс. текст «Итоговое решение по работе принимает научный руководитель»
 
 ### Точный подсчёт объёма (`src/lib/parser.ts`)
-Функция `computeBodyVolume(text)` ищет границы тела работы:
+Функция `computeBodyVolume(text, footnotesText)` ищет границы тела работы:
 - **Начало** — позиция заголовка «Введение» (или после титульника по эвристике «ВШЭ» в первых 2000 символов).
 - **Конец** — позиция «Список литературы / Список использованных источников / Библиография», иначе «Приложение».
-- Возвращает: `bodyWordCount`, `bodyCharCountWithSpaces`, `bodyCharCountNoSpaces`, `appendixWordCount`, `volumeBreakdown` (флаги, что удалось распознать).
-- `bodyCharCountWithSpaces` — главная метрика для порога допуска (≥90 000 для рус). Передаётся и в course-analyzer, и в course-review-prompt.
+- **Сноски включаются в тело** (по Программе практики). mammoth.extractRawText НЕ извлекает текст сносок (он в `word/footnotes.xml`), поэтому `parseDocx` отдельно достаёт его через `extractDocxNotesText(buffer)` (jszip → `<w:t>` из footnotes/endnotes.xml) и передаёт в `computeBodyVolume`, где объём сносок добавляется к телу. Для PDF сноски уже инлайн в тексте — отдельно не добавляются.
+- Возвращает: `bodyWordCount`, `bodyCharCountWithSpaces`, `bodyCharCountNoSpaces`, `appendixWordCount`, `footnoteCharCount`, `volumeBreakdown` (флаги, вкл. `footnotesFound`).
+- `bodyCharCountWithSpaces` (тело + сноски) — главная метрика для порога допуска (≥90 000 для рус). Передаётся и в course-analyzer, и в course-review-prompt; в UI/отзыве помечается «с учётом сносок».
 
 ### Схема `course_attempts`
 | Поле | Тип | Описание |
@@ -357,6 +358,10 @@ pm2 restart vkr-checker
 - В режиме преподавателя форма та же; после анализа вместо «Отправить работу преподавателю» — кнопка **«📄 Скачать Word-отзыв»** (POST `/api/course/reanalyze`). Работа сразу сохраняется в сводную таблицу (`source='teacher'`), поэтому к ней позже можно загрузить подписанный итоговый отзыв и выгрузить в архиве. Так реализована договорённость «хранить оба отзыва — чекера и преподавателя» для последующего сравнения.
 
 ## История изменений (последний коммит сверху)
+
+### 2026-06-XX: Учёт сносок в подсчёте объёма (критичный фикс)
+Файл: `parser.ts` (+ прозрачность в `course/page.tsx`, `course-analyzer.ts`, `course-review-prompt.ts`, поле `footnoteCharCount` в ответе `check`).
+- По Программе практики тело работы считается СО СНОСКАМИ. `mammoth.extractRawText` не извлекает текст сносок (он в `word/footnotes.xml`) → объём занижался, студенты ложно не добирали 90 000. Фикс: `extractDocxNotesText(buffer)` (jszip) достаёт текст сносок и добавляет его к телу в `computeBodyVolume`. PDF не затронут (сноски уже инлайн). Объём помечается «с учётом сносок (в т.ч. сноски: N)».
 
 ### 2026-06-XX: Обратная связь разработчику + удаление работ (модуль курсовых)
 Файлы: `db-course.ts`, `api/course/teacher/route.ts`, новый `api/course/feedback/route.ts`, `course/page.tsx`, `teacher/page.tsx`.
