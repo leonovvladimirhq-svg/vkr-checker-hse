@@ -9,10 +9,10 @@
 - **Frontend + Backend:** Next.js 14 (App Router), React, TypeScript
 - **Стили:** Tailwind CSS
 - **БД:** SQLite (через better-sqlite3), файл `data/vkr.db`
-- **AI:** OpenAI API (модель задаётся в `.env`, по умолчанию `gpt-4o-mini`)
+- **AI:** Qwen 3.6 35B через **Yandex AI Studio** (OpenAI-совместимый API; модель задаётся в `.env`)
 - **Парсинг документов:** mammoth (docx), pdf-parse (pdf), xlsx (Excel)
 - **Интеграция:** Яндекс.Диск API (публичные ссылки, без OAuth)
-- **Деплой:** PM2 + Nginx (reverse proxy) + Certbot (SSL)
+- **Деплой:** **Docker (docker compose) на Yandex Cloud** + Nginx (reverse proxy) + Certbot (SSL)
 - **Домен:** вкр-чекер.рф (Punycode: `xn----ctbkawc3be3d.xn--p1ai`)
 
 ## Структура проекта
@@ -95,8 +95,8 @@ data/
 - Преподаватель видит отзыв в модальном окне деталей попытки
 
 ### Авторизация
-- **Студент:** логин `student`, пароль `hse2025` (клиентская, без токенов)
-- **Преподаватель:** логин `admin 1029`, пароль `hsevkrch12` (клиентская)
+- **Студент:** клиентская авторизация (без токенов). Логин/пароль задаются при деплое — в публичном репозитории не приводятся.
+- **Преподаватель:** клиентская авторизация. Логин/пароль задаются при деплое — в публичном репозитории не приводятся.
 - Без авторизации формы недоступны
 - Несколько студентов могут работать параллельно с одними учётными данными — конфликтов нет (каждый запрос независим)
 
@@ -144,7 +144,7 @@ data/
 - `DELETE /api/report` очищает и флаг, и снапшот
 
 ### Защита эндпоинта отчёта (`src/app/api/report/route.ts`)
-- `POST /api/report` требует `{ password: '1234' }` в теле — без пароля возвращает 401
+- `POST /api/report` требует пароль в теле (`{ password: '<задаётся в коде>' }`) — без пароля возвращает 401
 - `DELETE /api/report` закрывает отчёт (очищает флаг и снапшот) — тоже требует пароль
 - Пароль хранится в константе `REPORT_PASSWORD` в route.ts
 
@@ -188,8 +188,10 @@ data/
 
 ## Переменные окружения (.env)
 ```
-OPENAI_API_KEY=sk-...          # Обязательно
-OPENAI_MODEL=gpt-4o-mini       # Текущая модель (можно: gpt-4o-mini, gpt-5-nano, gpt-5, o3-mini)
+# Yandex AI Studio — OpenAI-совместимый эндпоинт, модель Qwen 3.6 35B
+OPENAI_BASE_URL=https://llm.api.cloud.yandex.net/v1
+OPENAI_MODEL=gpt://<folder-id>/qwen3.6-35b-a3b/latest
+OPENAI_API_KEY=<API-ключ сервисного аккаунта Yandex Cloud>   # Обязательно
 SMTP_HOST=smtp.gmail.com       # Для email-дайджеста (опционально)
 SMTP_PORT=587
 SMTP_USER=your-email@gmail.com
@@ -226,27 +228,24 @@ npm run dev
 # Примечание: папка data/ и файл vkr.db создаются автоматически при первом запуске
 ```
 
-## Деплой (сервер)
-- **Сервер:** Ubuntu 24.04, 1 CPU, 1 ГБ RAM + 1 ГБ Swap (`/swapfile`)
+## Деплой (Yandex Cloud)
+- **Облако:** Yandex Cloud, зона `ru-central1-a`, каталог `project3-vkrchecker`
+- **ВМ:** Ubuntu 22.04, 2 vCPU / 4 ГБ RAM + 2 ГБ swap, статический публичный IP
+- **Запуск:** Docker (`docker compose`), контейнер `vkr-checker` на :3000, `restart: unless-stopped` (автозапуск после ребута)
 - **Домен:** вкр-чекер.рф (Punycode: `xn----ctbkawc3be3d.xn--p1ai`)
-- **IP:** 89.125.107.91
-- **Nginx:** reverse proxy на localhost:3000, SSL через Certbot (Let's Encrypt)
-- **Nginx конфиг:** `/etc/nginx/sites-available/vkr-checker`
+- **Nginx (на хосте):** reverse proxy на 127.0.0.1:3000, SSL через Certbot (Let's Encrypt, авто-продление)
   - `client_max_body_size 50m` — для загрузки файлов
-  - `proxy_read_timeout 180` — для долгих GPT-запросов
-- **Процесс-менеджер:** PM2 (`pm2 start ecosystem.config.js`), лимит памяти Node.js: `--max-old-space-size=768`
-- **Автозапуск:** настроен через `pm2 startup`
-- **Папка:** `/root/vkr-checker-hse/`
-- **БД на сервере:** `/root/vkr-checker-hse/data/vkr.db`
+  - увеличенный `proxy_read_timeout` для долгих запросов к модели (особенно `location /api/course/`)
+- **Папка на ВМ:** `/opt/vkr-checker/`
+- **Данные:** том `./data:/app/data` (SQLite БД `data/vkr.db` + загрузки) — переживают пересборку
+- **Модель:** Qwen 3.6 35B через Yandex AI Studio (см. «Переменные окружения»)
 
 ### Обновление на сервере
 ```bash
-ssh root@89.125.107.91
-cd /root/vkr-checker-hse
-git pull
-npm install
-npm run build
-pm2 restart vkr-checker
+ssh yc-user@<vm-ip>
+cd /opt/vkr-checker
+git pull          # или scp обновлённых файлов
+sudo docker compose up -d --build
 ```
 
 ## Модуль курсовой работы (`/course`)
@@ -254,8 +253,8 @@ pm2 restart vkr-checker
 Параллельный контур самопроверки **курсовых работ** студентов ОП ИК. Принципиально отличается от ВКР-модуля: акцент не на pass/fail, а на **интеллектуальных рекомендациях** по улучшению.
 
 ### Архитектура модуля
-- **Страница студента:** `src/app/course/page.tsx` — авторизация (`student` / `hse2025`, та же как у ВКР), форма (ФИО, **тема работы** — обязательное поле ≥5 символов, тип КР, **ссылка на базу данных Яндекс.Диска — обязательное поле**, файл), результат по «принципу бургера»: статус → общая оценка → **сильные стороны** → что доработать → разбор разделов → **эмпирическая глава двумя блоками** → **анализ базы данных** → приоритетные рекомендации → расширенные. Кнопка **«Отправить работу преподавателю»**. Роль ИИ — **ИИ-консультант** (не «научный руководитель»). На странице есть переключатель **«Я преподаватель»** (см. ниже «Упрощённый преподавательский флоу»).
-- **API анализа:** `src/app/api/course/check/route.ts` — `POST /api/course/check`. Парсит файл → вызывает Яндекс.Диск (`getPublicResourceInfo` + `analyzeDatabase` через `analyzeDbWithFallback`, с фолбэком на ссылку из текста работы) для проверки БД → вызывает GPT с фактическим содержимым БД и точным body-объёмом → автоматически пишет попытку в `course_attempts` (каждая загрузка логируется, ссылка на БД сохраняется в поле `db_link`). Принимает доп. поля `mode='teacher'` + `teacherPassword` (пароль `proverkahse`): в этом режиме файл сразу сохраняется и запись помечается `source='teacher'`.
+- **Страница студента:** `src/app/course/page.tsx` — авторизация (`student` / `<пароль студента>`, та же как у ВКР), форма (ФИО, **тема работы** — обязательное поле ≥5 символов, тип КР, **ссылка на базу данных Яндекс.Диска — обязательное поле**, файл), результат по «принципу бургера»: статус → общая оценка → **сильные стороны** → что доработать → разбор разделов → **эмпирическая глава двумя блоками** → **анализ базы данных** → приоритетные рекомендации → расширенные. Кнопка **«Отправить работу преподавателю»**. Роль ИИ — **ИИ-консультант** (не «научный руководитель»). На странице есть переключатель **«Я преподаватель»** (см. ниже «Упрощённый преподавательский флоу»).
+- **API анализа:** `src/app/api/course/check/route.ts` — `POST /api/course/check`. Парсит файл → вызывает Яндекс.Диск (`getPublicResourceInfo` + `analyzeDatabase` через `analyzeDbWithFallback`, с фолбэком на ссылку из текста работы) для проверки БД → вызывает GPT с фактическим содержимым БД и точным body-объёмом → автоматически пишет попытку в `course_attempts` (каждая загрузка логируется, ссылка на БД сохраняется в поле `db_link`). Принимает доп. поля `mode='teacher'` + `teacherPassword` (пароль `<пароль задаётся в коде>`): в этом режиме файл сразу сохраняется и запись помечается `source='teacher'`.
 - **API отправки преподавателю:** `src/app/api/course/submit/route.ts` — `POST`. Сохраняет файл в `data/course-uploads/<attemptId>.<ext>`, проставляет `submitted_at`, `file_path`, `work_title`.
 - **API преподавателя:** `src/app/api/course/teacher/route.ts` (GET list/detail; список отдаёт `source`, `hasTeacherReview`, `checkerGrade`), `download/route.ts` (GET оригинал), `reanalyze/route.ts` (POST: повторный GPT-анализ + **повторное обращение к Яндекс.Диску за актуальным состоянием БД** + генерация Word-отзыва; **сохраняет оценку чекера** в `checker_grade`/`checker_grade_rationale`).
 - **API загрузки итогового отзыва:** `src/app/api/course/upload-review/route.ts` — `POST` (FormData `attemptId`+`file`). Сохраняет подписанный преподавателем отзыв в `data/course-reviews/<attemptId>.<ext>`, проставляет `teacher_review_path` + `teacher_review_uploaded_at`.
@@ -354,7 +353,7 @@ pm2 restart vkr-checker
 
 ### Упрощённый преподавательский флоу «Я преподаватель / Проанализировать» (`/course`)
 Принят на встрече 11.06.2026 вместо массовой загрузки учебным офисом (отклонена до интеграции с LMS).
-- На странице `/course` (после студенческого входа) — переключатель **«Я преподаватель»** → модалка пароля **`proverkahse`**. Пароль кэшируется в localStorage на **25 минут** (привязка к ПК), функции `saveCourseTeacher/readCourseTeacher/getCourseTeacherPassword/clearCourseTeacher` в `src/lib/authCache.ts` (ключ `vkr-course-teacher`). Пароль проверяется и на сервере в `check/route.ts`.
+- На странице `/course` (после студенческого входа) — переключатель **«Я преподаватель»** → модалка пароля **`<пароль задаётся в коде>`**. Пароль кэшируется в localStorage на **25 минут** (привязка к ПК), функции `saveCourseTeacher/readCourseTeacher/getCourseTeacherPassword/clearCourseTeacher` в `src/lib/authCache.ts` (ключ `vkr-course-teacher`). Пароль проверяется и на сервере в `check/route.ts`.
 - В режиме преподавателя форма та же; после анализа вместо «Отправить работу преподавателю» — кнопка **«📄 Скачать Word-отзыв»** (POST `/api/course/reanalyze`). Работа сразу сохраняется в сводную таблицу (`source='teacher'`), поэтому к ней позже можно загрузить подписанный итоговый отзыв и выгрузить в архиве. Так реализована договорённость «хранить оба отзыва — чекера и преподавателя» для последующего сравнения.
 
 ## История изменений (последний коммит сверху)
@@ -371,7 +370,7 @@ pm2 restart vkr-checker
 ### 2026-06-11: Преподавательский флоу + загрузка/выгрузка отзывов + фикс подсчёта знаков (встреча 11.06.2026)
 Коммит `0369127`. Файлы: `course-review-prompt.ts`, `course-analyzer.ts`, `db-course.ts`, `authCache.ts`, `api/course/check`, `reanalyze`, `teacher` routes, новые `api/course/upload-review`, `api/course/export-reviews`, `course/page.tsx`, `teacher/page.tsx`, `package.json` (+`jszip`).
 1. **Фикс бага подсчёта знаков ×10** — числа объёма/порога в Word-отзыве писал GPT, получая локализованное «93 000» (неразрывный пробел) и роняя порядок. Теперь объём считается **детерминированно на сервере**, в промпты идут сырые целые.
-2. **«Я преподаватель / Проанализировать»** — упрощённый флоу на `/course` (после студенческого входа), пароль `proverkahse` (кэш 25 мин), быстрый анализ → «Скачать Word-отзыв». Запись помечается `source='teacher'`, попадает в сводную таблицу. `reanalyze` сохраняет `checker_grade` (для сравнения оценок).
+2. **«Я преподаватель / Проанализировать»** — упрощённый флоу на `/course` (после студенческого входа), пароль `<пароль задаётся в коде>` (кэш 25 мин), быстрый анализ → «Скачать Word-отзыв». Запись помечается `source='teacher'`, попадает в сводную таблицу. `reanalyze` сохраняет `checker_grade` (для сравнения оценок).
 3. **Загрузка подписанного итогового отзыва** — `POST /api/course/upload-review` + плашка «Загрузить итоговый отзыв» в таблице преподавателя; статус «✓ отзыв».
 4. **«Выгрузить всех»** — `GET /api/course/export-reviews`: ZIP (`jszip`) только из загруженных итоговых отзывов, имена файлов = ФИО студентов.
 5. Новые колонки `course_attempts`: `source`, `checker_grade`, `checker_grade_rationale`, `teacher_review_path`, `teacher_review_uploaded_at`.
@@ -410,7 +409,7 @@ pm2 restart vkr-checker
 
 ### 2026-04-22: 6 улучшений — безопасность, UX, стабильность
 Файлы: `report/route.ts`, `teacher/page.tsx`, `page.tsx`, `db.ts`, `attempts/route.ts`, `check/route.ts`; сервер: `ecosystem.config.js`, `/swapfile`
-1. **Авторизация «Создать отчёт»** — `POST /api/report` требует пароль `1234`; случайный вызов URL не публикует отчёт.
+1. **Авторизация «Создать отчёт»** — `POST /api/report` требует пароль; случайный вызов URL не публикует отчёт.
 2. **Кнопка «Закрыть отчёт»** — `DELETE /api/report` + toggle в панели преподавателя: видно текущий статус (Опубликован/Закрыт).
 3. **PM2 лимит памяти** — `--max-old-space-size=768` через `ecosystem.config.js`; предотвращает OOM-краши на 1 ГБ сервере.
 4. **Своп 1 ГБ** — `/swapfile` на сервере, добавлен в `/etc/fstab`; буфер при пиковой нагрузке.

@@ -2,9 +2,9 @@
 
 Веб-сервис автоматической проверки магистерских ВКР и курсовых работ для образовательной программы **«Интегрированные коммуникации»** Школы коммуникаций НИУ ВШЭ.
 
-Студент загружает документ (`.docx` / `.pdf`), указывает ссылку на базу данных (Яндекс.Диск) — сервис анализирует работу через OpenAI GPT по чек-листу методических материалов программы и выдаёт подробный отчёт.
+Студент загружает документ (`.docx` / `.pdf`), указывает ссылку на базу данных (Яндекс.Диск) — сервис анализирует работу через **Qwen 3.6 35B (Yandex AI Studio)** по чек-листу методических материалов программы и выдаёт подробный отчёт.
 
-**Продакшен:** [вкр-чекер.рф](https://xn----ctbkawc3be3d.xn--p1ai) (Punycode: `xn----ctbkawc3be3d.xn--p1ai`, IP `89.125.107.91`).
+**Продакшен:** [вкр-чекер.рф](https://xn----ctbkawc3be3d.xn--p1ai) — развёрнут в **Yandex Cloud** (зона `ru-central1`).
 
 **Полная техническая документация** — в [CLAUDE.md](./CLAUDE.md) (архитектурные решения, схема БД, история изменений). Этот README — точка входа для нового разработчика.
 
@@ -57,12 +57,12 @@
 | Фронтенд + бэкенд | **Next.js 14** (App Router), React, TypeScript |
 | Стили | Tailwind CSS |
 | База данных | SQLite через `better-sqlite3`, файл `data/vkr.db` |
-| AI | OpenAI API (модель в `.env`, по умолчанию `gpt-5.2`) |
+| AI | **Qwen 3.6 35B** через Yandex AI Studio (OpenAI-совместимый API, модель в `.env`) |
 | Парсинг документов | `mammoth` (.docx), `pdf-parse` (.pdf), `xlsx` (Excel) |
 | Word-генератор | `docx` (для отзывов на курсовые) |
 | Интеграция | Яндекс.Диск API (публичные ссылки, без OAuth) |
 | Email | `nodemailer` (опционально — для email-дайджестов преподавателю) |
-| Процесс-менеджер | PM2 (production) |
+| Контейнеризация | Docker / docker compose (production на Yandex Cloud) |
 | Веб-сервер | Nginx (reverse proxy + SSL через Certbot/Let's Encrypt) |
 
 ---
@@ -80,11 +80,12 @@ git checkout vkr-version-1
 # 2. Установить зависимости
 npm install
 
-# 3. Создать файл .env в корне проекта
-# Минимально нужен только OPENAI_API_KEY:
+# 3. Создать файл .env в корне проекта.
+# Прод использует Qwen через Yandex AI Studio (OpenAI-совместимый эндпоинт):
 cat > .env <<EOF
-OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-5.2
+OPENAI_BASE_URL=https://llm.api.cloud.yandex.net/v1
+OPENAI_MODEL=gpt://<folder-id>/qwen3.6-35b-a3b/latest
+OPENAI_API_KEY=<API-ключ сервисного аккаунта Yandex Cloud>
 EOF
 
 # 4. Запустить в режиме разработки
@@ -107,8 +108,9 @@ npm run dev
 
 | Переменная | Обязательная | Описание |
 |------------|--------------|----------|
-| `OPENAI_API_KEY` | **Да** | Ключ OpenAI API |
-| `OPENAI_MODEL` | Нет | Модель GPT. По умолчанию `gpt-5.2`. Поддерживаются `gpt-4o-mini`, `gpt-5`, `gpt-5-nano`, `o3-mini` и др. — параметры (temperature / max_tokens vs max_completion_tokens) подбираются автоматически |
+| `OPENAI_API_KEY` | **Да** | API-ключ сервисного аккаунта Yandex Cloud (для Yandex AI Studio) |
+| `OPENAI_BASE_URL` | **Да** (прод) | OpenAI-совместимый эндпоинт Yandex AI Studio: `https://llm.api.cloud.yandex.net/v1` |
+| `OPENAI_MODEL` | **Да** (прод) | URI модели, напр. `gpt://<folder-id>/qwen3.6-35b-a3b/latest`. Параметры запроса (temperature / max_tokens vs max_completion_tokens / reasoning_effort) подбираются автоматически |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | Нет | Для email-дайджеста преподавателю (опционально) |
 | `DIGEST_RECIPIENT` | Нет | Email получателя дайджеста |
 
@@ -160,7 +162,7 @@ vkr-checker-app/
 │   ├── uploads/                    # Загруженные файлы ВКР
 │   └── course-uploads/             # Загруженные файлы курсовых (только после Submit)
 ├── public/                         # Статика Next.js
-├── ecosystem.config.js             # Конфиг PM2 (production)
+├── ecosystem.config.js             # (legacy PM2-конфиг; прод теперь в Docker)
 ├── next.config.js                  # Конфиг Next.js
 ├── tailwind.config.js              # Конфиг Tailwind
 ├── tsconfig.json                   # Конфиг TypeScript
@@ -199,11 +201,15 @@ vkr-checker-app/
 
 Авторизация **клиентская** (без токенов, localStorage TTL 24 часа). Подходит для контролируемой учебной среды.
 
+> ⚠️ Логины/пароли (студент, преподаватель, публикация отчёта, преподавательский режим курсовых)
+> **не приводятся в публичном репозитории**. Реальные значения хранятся вне репозитория и
+> известны владельцу проекта.
+
 | Роль | Логин | Пароль |
 |------|-------|--------|
-| Студент (ВКР, курсовые, отчёт) | `student` | `hse2025` |
-| Преподаватель | `admin 1029` | `hsevkrch12` |
-| Пароль публикации итогового отчёта | — | `1234` |
+| Студент (ВКР, курсовые, отчёт) | `student` | `<задаётся при деплое>` |
+| Преподаватель | `<логин>` | `<задаётся при деплое>` |
+| Пароль публикации итогового отчёта | — | `<задаётся в коде/окружении>` |
 
 Пароль публикации хранится в константе `REPORT_PASSWORD` в `src/app/api/report/route.ts`.
 
@@ -231,37 +237,39 @@ cp /root/vkr-checker-hse/data/vkr.db /root/backups/vkr-$(date +%Y%m%d-%H%M).db
 
 ---
 
-## Деплой на продакшен
+## Деплой (Yandex Cloud)
 
-### Сервер
-- **OS:** Ubuntu 24.04, 1 CPU, 1 ГБ RAM + 1 ГБ Swap (`/swapfile`).
-- **IP:** `89.125.107.91`.
+### Инфраструктура
+- **Облако:** Yandex Cloud, зона `ru-central1-a`, каталог `project3-vkrchecker`.
+- **ВМ:** Ubuntu 22.04, 2 vCPU / 4 ГБ RAM + 2 ГБ swap, статический публичный IP.
+- **Запуск:** Docker (`docker compose`) — контейнер `vkr-checker` на порту 3000, `restart: unless-stopped` (автозапуск после ребута ВМ).
+- **Nginx** (на хосте): reverse proxy на `127.0.0.1:3000`, SSL **Let's Encrypt/Certbot** (авто-продление). Параметры: `client_max_body_size 50m` (загрузка файлов), увеличенный `proxy_read_timeout` для долгих запросов к модели (особенно `location /api/course/`).
 - **Домен:** `вкр-чекер.рф` (Punycode `xn----ctbkawc3be3d.xn--p1ai`).
-- **Путь проекта:** `/root/vkr-checker-hse/`.
-- **Nginx:** reverse proxy на `localhost:3000`, SSL через Certbot/Let's Encrypt. Конфиг: `/etc/nginx/sites-available/vkr-checker`. Важные параметры: `client_max_body_size 50m` (загрузка файлов), `proxy_read_timeout 180` (долгие GPT-запросы).
-- **PM2:** процесс `vkr-checker`, лимит памяти Node.js `--max-old-space-size=768` (см. `ecosystem.config.js`). Автозапуск через `pm2 startup`.
+- **Путь проекта на ВМ:** `/opt/vkr-checker/`. Данные (SQLite БД + загрузки) — в томе `./data:/app/data`.
 
-### Обновление сервера
+### Модель (Yandex AI Studio)
+Сервис обращается к **Qwen 3.6 35B** через OpenAI-совместимый эндпоинт Yandex AI Studio.
+Настраивается в `.env` (реальные значения задаются при деплое, в репозиторий не коммитятся):
+```
+OPENAI_BASE_URL=https://llm.api.cloud.yandex.net/v1
+OPENAI_MODEL=gpt://<folder-id>/qwen3.6-35b-a3b/latest
+OPENAI_API_KEY=<API-ключ сервисного аккаунта Yandex Cloud>
+```
 
-После пуша новых коммитов в `vkr-version-1`:
+### Обновление / деплой
 ```bash
-ssh root@89.125.107.91
-cd /root/vkr-checker-hse
-git pull origin vkr-version-1
-npm install
-npm run build
-pm2 restart vkr-checker
-pm2 status  # проверка, что процесс online
+ssh yc-user@<vm-ip>
+cd /opt/vkr-checker
+# обновить код (git pull или scp), затем пересобрать и поднять контейнер:
+sudo docker compose up -d --build
 ```
 
 ### Откат
 ```bash
-ssh root@89.125.107.91
-cd /root/vkr-checker-hse
-git log --oneline -10           # найти предыдущий коммит
-git checkout <commit-hash>      # вернуться на него
-npm install && npm run build
-pm2 restart vkr-checker
+ssh yc-user@<vm-ip>
+cd /opt/vkr-checker
+git checkout <commit-hash>      # вернуться на предыдущую версию
+sudo docker compose up -d --build
 ```
 
 ---
@@ -270,24 +278,25 @@ pm2 restart vkr-checker
 
 ### Логи
 ```bash
-pm2 logs vkr-checker             # живой лог
-pm2 logs vkr-checker --lines 200 # последние 200 строк
-pm2 flush                        # очистить логи
+cd /opt/vkr-checker
+sudo docker compose logs -f          # живой лог приложения
+sudo docker compose logs --tail 200  # последние 200 строк
+sudo tail -f /var/log/nginx/access.log
 ```
 
-### Перезагрузка процесса без потери коннектов
+### Перезапуск
 ```bash
-pm2 reload vkr-checker  # graceful reload
+sudo docker compose restart   # перезапуск контейнера
 ```
 
-### Если процесс упал по OOM
-- проверь `pm2 status` (поле «↺» — сколько раз перезапускался);
-- проверь свободную память: `free -h`;
-- свап включён? `swapon --show` (должен показать `/swapfile` 1G);
-- лимит Node.js: `--max-old-space-size=768` в `ecosystem.config.js`.
+### Если контейнер упал по OOM
+- статус: `sudo docker compose ps` и `sudo docker stats --no-stream`;
+- свободная память: `free -h`;
+- swap включён? `swapon --show` (должен показать `/swapfile` 2G);
+- лимит heap Node.js задаётся через `NODE_OPTIONS=--max-old-space-size` в `Dockerfile`/окружении.
 
-### Обновление модели GPT
-Достаточно изменить `OPENAI_MODEL` в `.env` и `pm2 restart vkr-checker`. Параметры (`temperature`, `max_tokens` vs `max_completion_tokens`, поддержка JSON-mode) подбираются автоматически в `getModelParams()` (см. `src/lib/analyzer.ts` и `src/lib/course-analyzer.ts`).
+### Обновление модели
+Достаточно изменить `OPENAI_MODEL` в `.env` и пересоздать контейнер (`sudo docker compose up -d`). Параметры запроса (`temperature`, `max_tokens` vs `max_completion_tokens`, JSON-mode, `reasoning_effort`) подбираются автоматически в `getModelParams()` (см. `src/lib/analyzer.ts` и `src/lib/course-analyzer.ts`).
 
 ### Добавление новых методических материалов
 Положи файл `.md` в `src/lib/methodology/` и подключи в `index.ts` через функцию `getMethodologyForCourse(type)` — содержимое автоматически попадёт в системный промпт GPT.
