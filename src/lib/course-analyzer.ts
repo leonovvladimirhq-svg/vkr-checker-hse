@@ -451,7 +451,7 @@ export async function analyzeCourseWork(
   const model = process.env.OPENAI_MODEL || 'gpt-5.2';
   const { useMaxCompletionTokens, supportsJsonFormat, supportsTemperature } = getModelParams(model);
 
-  const openai = new OpenAI({ apiKey: key });
+  const openai = new OpenAI({ apiKey: key, baseURL: process.env.OPENAI_BASE_URL || undefined });
 
   const systemPrompt = buildSystemPrompt(type);
   const userPrompt = buildUserPrompt(type, doc, dbAnalysis);
@@ -485,6 +485,11 @@ export async function analyzeCourseWork(
     requestParams.messages = [
       { role: 'user', content: `${systemPrompt}\n\n${userPrompt}` },
     ];
+  }
+
+  // Qwen (Yandex AI Studio) — без reasoning_effort=none возвращает пустой content.
+  if (model.startsWith('gpt://')) {
+    requestParams.reasoning_effort = 'none';
   }
 
   const completion = await openai.chat.completions.create(requestParams);

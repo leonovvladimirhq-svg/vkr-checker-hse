@@ -124,7 +124,7 @@ export async function generateReviewFields(
   if (!key) throw new Error('OpenAI API Key не указан');
 
   const model = process.env.OPENAI_MODEL || 'gpt-5.2';
-  const openai = new OpenAI({ apiKey: key });
+  const openai = new OpenAI({ apiKey: key, baseURL: process.env.OPENAI_BASE_URL || undefined });
   const { system, user } = buildPrompt(type, doc, studentName, workTitle, dbAnalysis);
 
   const params: any = {
@@ -139,6 +139,11 @@ export async function generateReviewFields(
   // gpt-5-nano и o-серия — без temperature
   if (!/^(o[1-9]|gpt-5-nano)/i.test(model)) {
     params.temperature = 0.2;
+  }
+
+  // Qwen (Yandex AI Studio) — без reasoning_effort=none возвращает пустой content.
+  if (model.startsWith('gpt://')) {
+    params.reasoning_effort = 'none';
   }
 
   const completion = await openai.chat.completions.create(params);

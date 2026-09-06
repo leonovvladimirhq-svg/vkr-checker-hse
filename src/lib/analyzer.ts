@@ -255,7 +255,9 @@ export async function analyzeDocument(opts: AnalyzeOptions): Promise<GPTCheckRes
   const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
   const { useMaxCompletionTokens, supportsJsonFormat, supportsTemperature } = getModelParams(model);
 
-  const openai = new OpenAI({ apiKey: key });
+  // baseURL берётся из env (Yandex AI Studio: https://llm.api.cloud.yandex.net/v1).
+  // Если не задан — поведение по умолчанию (api.openai.com).
+  const openai = new OpenAI({ apiKey: key, baseURL: process.env.OPENAI_BASE_URL || undefined });
 
   // Формируем параметры запроса в зависимости от модели
   const requestParams: any = {
@@ -290,6 +292,12 @@ export async function analyzeDocument(opts: AnalyzeOptions): Promise<GPTCheckRes
     // Переносим system prompt в user message
     requestParams.messages[0].content =
       buildSystemPrompt(programme) + '\n\n' + requestParams.messages[0].content;
+  }
+
+  // Qwen (Yandex AI Studio) — reasoning-модель. Без reasoning_effort=none она тратит
+  // весь бюджет токенов на "размышления" и возвращает пустой content.
+  if (model.startsWith('gpt://')) {
+    requestParams.reasoning_effort = 'none';
   }
 
   const completion = await openai.chat.completions.create(requestParams);

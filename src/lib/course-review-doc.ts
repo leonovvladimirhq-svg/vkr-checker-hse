@@ -15,6 +15,7 @@ import {
   TextRun,
   AlignmentType,
   WidthType,
+  TableLayoutType,
   BorderStyle,
   ShadingType,
 } from 'docx';
@@ -128,27 +129,27 @@ function cellP(text: string, opts: { bold?: boolean; align?: (typeof AlignmentTy
   return p(text || '', opts);
 }
 
-function headerCell(text: string, widthPct?: number): TableCell {
+function headerCell(text: string, widthDxa?: number): TableCell {
   return new TableCell({
-    width: widthPct ? { size: widthPct, type: WidthType.PERCENTAGE } : undefined,
+    width: widthDxa ? { size: widthDxa, type: WidthType.DXA } : undefined,
     borders,
     shading: { type: ShadingType.CLEAR, color: 'auto', fill: 'F2F2F2' },
     children: [cellP(text, { bold: true })],
   });
 }
 
-function dataCell(text: string, widthPct?: number): TableCell {
+function dataCell(text: string, widthDxa?: number): TableCell {
   return new TableCell({
-    width: widthPct ? { size: widthPct, type: WidthType.PERCENTAGE } : undefined,
+    width: widthDxa ? { size: widthDxa, type: WidthType.DXA } : undefined,
     borders,
     children: [cellP(text)],
   });
 }
 
 /** Ячейка с двумя параграфами: обычный комментарий + красная пометка о ручной проверке. */
-function dataCellWithBadge(text: string, badge: string, widthPct?: number): TableCell {
+function dataCellWithBadge(text: string, badge: string, widthDxa?: number): TableCell {
   return new TableCell({
-    width: widthPct ? { size: widthPct, type: WidthType.PERCENTAGE } : undefined,
+    width: widthDxa ? { size: widthDxa, type: WidthType.DXA } : undefined,
     borders,
     children: [
       cellP(text),
@@ -212,21 +213,25 @@ export async function generateReviewDocx(data: ReviewTemplateData): Promise<Buff
 
   const bdTable = new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
+    // Явная сетка колонок (DXA) + фиксированный layout — иначе таблица «плывёт»
+    // в редакторах, отличных от MS Word (Pages, TextMaker).
+    columnWidths: [4510, 1353, 3157],
+    layout: TableLayoutType.FIXED,
     rows: [
       new TableRow({
         children: [
-          headerCell('Критерий', 50),
-          headerCell('ДА/НЕТ', 15),
-          headerCell('Комментарий по критерию', 35),
+          headerCell('Критерий', 4510),
+          headerCell('ДА/НЕТ', 1353),
+          headerCell('Комментарий по критерию', 3157),
         ],
       }),
       ...data.bdCriteria.map(c => new TableRow({
         children: [
-          dataCell(c.criterion, 50),
-          dataCell(c.yesNo, 15),
+          dataCell(c.criterion, 4510),
+          dataCell(c.yesNo, 1353),
           needsManualCheck(c.comment)
-            ? dataCellWithBadge(c.comment, 'Рекомендуется ручная проверка', 35)
-            : dataCell(c.comment, 35),
+            ? dataCellWithBadge(c.comment, 'Рекомендуется ручная проверка', 3157)
+            : dataCell(c.comment, 3157),
         ],
       })),
     ],
@@ -257,21 +262,23 @@ export async function generateReviewDocx(data: ReviewTemplateData): Promise<Buff
   // ===== ИИ-таблица =====
   const aiTable = new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
+    columnWidths: [5412, 902, 2706],
+    layout: TableLayoutType.FIXED,
     rows: [
       new TableRow({
         children: [
-          headerCell('Критерий', 60),
-          headerCell('ДА/НЕТ', 10),
-          headerCell('Комментарий по критерию', 30),
+          headerCell('Критерий', 5412),
+          headerCell('ДА/НЕТ', 902),
+          headerCell('Комментарий по критерию', 2706),
         ],
       }),
       ...data.aiCriteria.map(c => new TableRow({
         children: [
-          dataCell(c.criterion, 60),
-          dataCell(c.yesNo, 10),
+          dataCell(c.criterion, 5412),
+          dataCell(c.yesNo, 902),
           needsManualCheck(c.comment) || c.yesNo === '—'
-            ? dataCellWithBadge(c.comment, 'Рекомендуется ручная проверка', 30)
-            : dataCell(c.comment, 30),
+            ? dataCellWithBadge(c.comment, 'Рекомендуется ручная проверка', 2706)
+            : dataCell(c.comment, 2706),
         ],
       })),
     ],
@@ -280,23 +287,25 @@ export async function generateReviewDocx(data: ReviewTemplateData): Promise<Buff
   // ===== Характеристика работы студента =====
   const workTable = new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
+    columnWidths: [451, 4960, 722, 1985, 902],
+    layout: TableLayoutType.FIXED,
     rows: [
       new TableRow({
         children: [
-          headerCell('№', 5),
-          headerCell('Критерий', 55),
-          headerCell('Вес', 8),
-          headerCell('Содержательный комментарий по критерию', 22),
-          headerCell('Оценка', 10),
+          headerCell('№', 451),
+          headerCell('Критерий', 4960),
+          headerCell('Вес', 722),
+          headerCell('Содержательный комментарий по критерию', 1985),
+          headerCell('Оценка', 902),
         ],
       }),
       ...data.workCriteria.map(c => new TableRow({
         children: [
-          dataCell(String(c.number), 5),
-          dataCell(c.title, 55),
-          dataCell(c.weight, 8),
-          dataCell(c.comment, 22),
-          dataCell(c.score, 10),
+          dataCell(String(c.number), 451),
+          dataCell(c.title, 4960),
+          dataCell(c.weight, 722),
+          dataCell(c.comment, 1985),
+          dataCell(c.score, 902),
         ],
       })),
       new TableRow({
@@ -306,7 +315,7 @@ export async function generateReviewDocx(data: ReviewTemplateData): Promise<Buff
             columnSpan: 4,
             children: [cellP('Рекомендуемая оценка по КР с учётом соблюдения требований к объёму, структуре и оформлению', { bold: true })],
           }),
-          dataCell(data.recommendedGrade, 10),
+          dataCell(data.recommendedGrade, 902),
         ],
       }),
     ],

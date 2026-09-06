@@ -22,6 +22,39 @@ export interface YaDiskFolderResult {
 const API_BASE = 'https://cloud-api.yandex.net/v1/disk/public/resources';
 const TIMEOUT_MS = 15000;
 
+// Хосты, которые Яндекс.Диск API принимает как public_key напрямую.
+const DISK_HOST_RE = /^https?:\/\/(?:disk\.360\.yandex\.[a-z]+|disk\.yandex\.[a-z]+|yadi\.sk)\//i;
+
+/**
+ * Разворачивает сокращённую/непрямую ссылку в прямую ссылку Яндекс.Диска.
+ * - Если ссылка уже «дисковая» — возвращает как есть.
+ * - Иначе best-effort пытается пройти по редиректу (clck.ru, sba.yandex.ru/redirect).
+ *   ВАЖНО: на серверных IP clck.ru может отдавать капчу вместо редиректа — тогда
+ *   развернуть не удаётся и возвращается null (вызывающий покажет понятное сообщение).
+ */
+export async function resolveDiskUrl(rawUrl: string): Promise<string | null> {
+  if (!rawUrl) return null;
+  if (DISK_HOST_RE.test(rawUrl)) return rawUrl;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const res = await fetch(rawUrl, { redirect: 'follow', signal: controller.signal });
+    clearTimeout(timeout);
+    try { await res.body?.cancel(); } catch { /* ignore */ }
+    let landing = res.url || '';
+    // sba.yandex.ru/redirect?url=<целевой адрес> — достаём диск-ссылку из параметра url
+    try {
+      const u = new URL(landing);
+      if (/(^|\.)sba\.yandex\./i.test(u.hostname) && u.searchParams.get('url')) {
+        landing = decodeURIComponent(u.searchParams.get('url') as string);
+      }
+    } catch { /* ignore */ }
+    return DISK_HOST_RE.test(landing) ? landing : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Извлекает первую публичную ссылку Яндекс.Диска из текста работы (обычно — с титульного листа).
  * Используется как фолбэк, когда ссылка из формы пустая или недоступна.
@@ -122,7 +155,14 @@ async function fetchFolderRecursive(
 /**
  * Получить информацию о публичной папке/файле на Яндекс.Диске
  */
-export async function getPublicResourceInfo(publicUrl: string): Promise<YaDiskFolderResult> {
+export async function getPublicResourceInfo(rawUrl: string): Promise<YaDiskFolderResult> {
+  const publicUrl = await resolveDiskUrl(rawUrl);
+  if (!publicUrl) {
+    return {
+      name: '', files: [], totalFiles: 0, accessible: false,
+      error: 'Ссылка не распознана как прямая ссылка на Яндекс.Диск. Если вы использовали короткую ссылку (например, clck.ru) — вставьте, пожалуйста, прямую ссылку вида https://disk.yandex.ru/... или https://disk.360.yandex.ru/...',
+    };
+  }
   try {
     const url = `${API_BASE}?public_key=${encodeURIComponent(publicUrl)}&limit=100`;
     const controller = new AbortController();
@@ -184,7 +224,9 @@ export async function getPublicResourceInfo(publicUrl: string): Promise<YaDiskFo
 /**
  * Скачать файл из публичной папки на Яндекс.Диске
  */
-export async function downloadPublicFile(publicUrl: string, filePath?: string): Promise<Buffer | null> {
+export async function downloadPublicFile(rawUrl: string, filePath?: string): Promise<Buffer | null> {
+  const publicUrl = await resolveDiskUrl(rawUrl);
+  if (!publicUrl) return null;
   try {
     let url = `${API_BASE}/download?public_key=${encodeURIComponent(publicUrl)}`;
     if (filePath) {
