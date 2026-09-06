@@ -7,10 +7,38 @@ import { YaDiskFileInfo, YaDiskFolderResult, downloadPublicFile, getPublicResour
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
 
+/** Технические параметры одного медиафайла базы данных. */
+export interface DbMediaFile {
+  name: string;
+  size: number;
+  ext: string;
+  /** Ориентировочная длительность в минутах, посчитанная по размеру файла
+   *  и типичному битрейту формата. null — оценить невозможно (видео,
+   *  неизвестный контейнер). Это ОЦЕНКА, а не измерение: Яндекс.Диск API
+   *  длительность в метаданных публичной ссылки не отдаёт. */
+  estMinutes: number | null;
+  /** Формат допускается приложением 35 (аудио MP3/WAV, видео AVI/MOV/MPEG). */
+  formatAllowed: boolean;
+}
+
+/** Сводка по составу базы данных — для технической части отзыва
+ *  (приложение 36: «Содержит ___ аудио/видеофайл(ов), ___ таблиц, ___ других файлов»). */
+export interface DbStats {
+  total: number;
+  media: number;       // аудио + видео
+  tables: number;      // xlsx/xls/csv/tsv
+  documents: number;   // docx/pdf
+  other: number;
+  mediaFiles: DbMediaFile[];
+  /** Медиафайлы в форматах, не предусмотренных приложением 35. */
+  disallowedFormats: string[];
+}
+
 export interface DbAnalysisResult {
   accessible: boolean;
   description: string;       // Текстовое описание для GPT
   fileCount: number;
+  stats?: DbStats;
   error?: string;
 }
 
@@ -96,6 +124,7 @@ export async function analyzeDatabase(
       accessible: true,
       description: 'Папка пуста — файлы не найдены.',
       fileCount: 0,
+      stats: emptyStats(),
     };
   }
 
@@ -104,16 +133,23 @@ export async function analyzeDatabase(
   lines.push('');
 
   // Группируем файлы по типу
-  const audioFiles = folderInfo.files.filter(f => isAudio(f));
+  const mediaFiles = folderInfo.files.filter(f => isAudio(f) || isVideo(f));
   const spreadsheetFiles = folderInfo.files.filter(f => isSpreadsheet(f));
   const documentFiles = folderInfo.files.filter(f => isDocument(f));
-  const otherFiles = folderInfo.files.filter(f => !isAudio(f) && !isSpreadsheet(f) && !isDocument(f));
+  const otherFiles = folderInfo.files.filter(
+    f => !isAudio(f) && !isVideo(f) && !isSpreadsheet(f) && !isDocument(f),
+  );
 
-  // Аудиофайлы — только метаданные
-  if (audioFiles.length > 0) {
-    lines.push(`Аудиофайлы (${audioFiles.length}):`);
-    for (const f of audioFiles) {
-      lines.push(`  - ${f.name} (${formatSize(f.size)})`);
+  // Аудио/видео — только метаданные (содержимое не скачиваем).
+  // Длительность даём ОЦЕНКОЙ по размеру: публичный API Яндекс.Диска её не отдаёт.
+  const mediaStats = mediaFiles.map(toMediaFile);
+  if (mediaFiles.length > 0) {
+    lines.push(`Аудио/видеофайлы (${mediaFiles.length}):`);
+    for (const m of mediaStats) {
+      const dur = m.estMinutes === null
+        ? 'длительность автоматически не определяется'
+        : `ориентировочно ~${m.estMinutes} мин (оценка по размеру файла, не измерение)`;
+      lines.push(`  - ${m.name} (${formatSize(m.size)}, ${dur})`);
     }
     lines.push('');
   }
@@ -171,6 +207,17 @@ export async function analyzeDatabase(
     accessible: true,
     description: lines.join('\n'),
     fileCount: folderInfo.totalFiles,
+    stats: {
+      total: folderInfo.totalFiles,
+      media: mediaFiles.length,
+      tables: spreadsheetFiles.length,
+      documents: documentFiles.length,
+      other: otherFiles.length,
+      mediaFiles: mediaStats,
+      disallowedFormats: Array.from(
+        new Set(mediaStats.filter(m => !m.formatAllowed).map(m => m.ext)),
+      ),
+    },
   };
 }
 
@@ -270,9 +317,53 @@ async function parsePdfBuffer(buffer: Buffer): Promise<string> {
 
 // --- Утилиты ---
 
+const AUDIO_EXTENSIONS = ['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac', '.wma'];
+const VIDEO_EXTENSIONS = ['.avi', '.mov', '.mpeg', '.mpg', '.mp4', '.mkv', '.wmv', '.webm'];
+
+/** Форматы, прямо разрешённые приложением 35 Программы практики ОП РиСО. */
+const ALLOWED_MEDIA_EXTENSIONS = ['.mp3', '.wav', '.avi', '.mov', '.mpeg', '.mpg'];
+
+/**
+ * Типичный размер минуты записи, байт. Используется только для ОРИЕНТИРОВОЧНОЙ
+ * оценки длительности: точную длительность даёт лишь чтение заголовков файла,
+ * а медиафайлы мы принципиально не скачиваем.
+ */
+const BYTES_PER_MINUTE: Record<string, number> = {
+  '.mp3': 960000,      // 128 кбит/с
+  '.m4a': 960000,
+  '.aac': 960000,
+  '.ogg': 960000,
+  '.wma': 960000,
+  '.flac': 5250000,    // ~700 кбит/с
+  '.wav': 10584000,    // 44,1 кГц / 16 бит / стерео
+};
+
 function isAudio(f: YaDiskFileInfo): boolean {
+  return AUDIO_EXTENSIONS.includes(getExtension(f.name));
+}
+
+function isVideo(f: YaDiskFileInfo): boolean {
+  return VIDEO_EXTENSIONS.includes(getExtension(f.name));
+}
+
+function toMediaFile(f: YaDiskFileInfo): DbMediaFile {
   const ext = getExtension(f.name);
-  return ['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac', '.wma'].includes(ext);
+  const perMinute = BYTES_PER_MINUTE[ext];
+  return {
+    name: f.name,
+    size: f.size,
+    ext,
+    // Для видео битрейт варьируется на два порядка — оценку не даём.
+    estMinutes: perMinute ? Math.round(f.size / perMinute) : null,
+    formatAllowed: ALLOWED_MEDIA_EXTENSIONS.includes(ext),
+  };
+}
+
+function emptyStats(): DbStats {
+  return {
+    total: 0, media: 0, tables: 0, documents: 0, other: 0,
+    mediaFiles: [], disallowedFormats: [],
+  };
 }
 
 function isSpreadsheet(f: YaDiskFileInfo): boolean {

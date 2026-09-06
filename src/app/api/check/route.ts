@@ -1,14 +1,20 @@
 // ============================================================
 // POST /api/check — Главный эндпоинт проверки ВКР
 // Принимает multipart/form-data с файлом и метаданными
+//
+// Работает для двух образовательных программ (поле programme):
+//   'ik'   — «Интегрированные коммуникации» (магистратура)
+//   'riso' — «Реклама и связи с общественностью» (бакалавриат)
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
 import { parseDocument } from '@/lib/parser';
 import { analyzeDocument, mergeResults } from '@/lib/analyzer';
-import { getChecklist, WorkType, ResearchMethod } from '@/lib/checklist';
+import { getChecklist, WorkType, WorkLang, ResearchMethod } from '@/lib/checklist';
+import { getProgramme, isProgrammeId, isValidWorkType, DEFAULT_PROGRAMME } from '@/lib/programmes';
 import { getPublicResourceInfo } from '@/lib/yandex-disk';
 import { analyzeDatabase, DbAnalysisResult } from '@/lib/db-analyzer';
+import { assessVolume, VolumeAssessment } from '@/lib/volume';
 
 export const maxDuration = 120; // Увеличенный таймаут для GPT-анализа
 
@@ -18,7 +24,9 @@ export async function POST(req: NextRequest) {
 
     // --- Извлечение полей ---
     const studentName = (formData.get('studentName') as string)?.trim();
+    const programmeId = (formData.get('programme') as string) || DEFAULT_PROGRAMME;
     const workType = formData.get('workType') as WorkType;
+    const workLang = ((formData.get('workLang') as string) || 'ru') as WorkLang;
     const usesAI = formData.get('usesAI') === 'true';
     const dbLink = formData.get('dbLink') as string || '';
     const presLink = formData.get('presLink') as string || '';
@@ -35,15 +43,31 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!['project', 'dissertation'].includes(workType)) {
+    if (!isProgrammeId(programmeId)) {
+      return NextResponse.json({ error: 'Неизвестная образовательная программа' }, { status: 400 });
+    }
+    const programme = getProgramme(programmeId);
+
+    if (!isValidWorkType(programme.id, workType)) {
       return NextResponse.json(
-        { error: 'Неверный тип работы' },
+        { error: `Тип работы «${workType}» не предусмотрен программой «${programme.label}»` },
         { status: 400 }
       );
     }
 
+    if (workLang !== 'ru' && workLang !== 'en') {
+      return NextResponse.json({ error: 'Неверный язык работы' }, { status: 400 });
+    }
+
     const empMethods: ResearchMethod[] = JSON.parse(empMethodsRaw);
     const compMethods: ResearchMethod[] = JSON.parse(compMethodsRaw);
+
+    if (empMethods.length < programme.minMethods(workType)) {
+      return NextResponse.json(
+        { error: `Для этой работы нужно выбрать минимум ${programme.minMethods(workType)} метод(а) исследования` },
+        { status: 400 }
+      );
+    }
 
     // --- Парсинг документа через mammoth/pdf-parse ---
     const fileBuffer = Buffer.from(await file.arrayBuffer());
@@ -61,12 +85,42 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // --- Объём работы: считается программно, без участия GPT ---
+    const volume: VolumeAssessment | null = programme.volumeThresholds
+      ? assessVolume(doc, workLang)
+      : null;
+
     // --- Сборка чек-листа ---
-    const checklist = getChecklist(workType, empMethods, compMethods, usesAI, otherMethodName || undefined);
+    const checklist = getChecklist({
+      programme: programme.id,
+      type: workType,
+      empMethods,
+      compMethods,
+      usesAI,
+      otherMethodName: otherMethodName || undefined,
+      lang: workLang,
+    });
 
     // --- Анализ через GPT ---
-    const gptResults = await analyzeDocument(workType, usesAI, doc, undefined, dbAnalysis, checklist);
-    const results = mergeResults(checklist, gptResults, dbLink, dbAnalysis, presLink);
+    const gptResults = await analyzeDocument({
+      programme: programme.id,
+      type: workType,
+      usesAI,
+      doc,
+      lang: workLang,
+      dbAnalysis,
+      checklist,
+    });
+
+    const results = mergeResults({
+      checklist,
+      gptResults,
+      dbLink,
+      dbAnalysis,
+      presLink,
+      volume,
+      mediaMinMinutes: programme.mediaMinMinutes,
+    });
 
     // --- Определение статуса ---
     const failedCount = results.filter(r => r.passed === false).length;
@@ -77,7 +131,10 @@ export async function POST(req: NextRequest) {
     // --- Ответ (без сохранения в БД — студент сохраняет явно) ---
     return NextResponse.json({
       studentName,
+      programme: programme.id,
+      programmeLabel: programme.label,
       workType,
+      workLang,
       status: overallStatus,
       results,
       summary: {
@@ -93,6 +150,10 @@ export async function POST(req: NextRequest) {
         headingsFound: doc.headings.length,
         textPreview: doc.text.substring(0, 500) + '...',
       },
+      // Технические параметры для отзыва руководителя (приложение 36 Программы
+      // практики ОП РиСО): состав БД и объём работы. Договорённость встречи
+      // 10.07.2026 — ИИ отвечает за технику, содержательная оценка за человеком.
+      technical: buildTechnicalSummary(volume, dbAnalysis),
       // Метаданные для последующего сохранения
       saveData: {
         extractedTextPreview: doc.text.substring(0, 2000),
@@ -102,6 +163,9 @@ export async function POST(req: NextRequest) {
         usesAI,
         fileName: file.name,
         resultsJson: JSON.stringify(results),
+        programme: programme.id,
+        workLang,
+        volumeJson: volume ? JSON.stringify(volume) : '',
       },
     });
 
@@ -112,4 +176,42 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+/**
+ * Техническая справка для отзыва руководителя.
+ * Только измеримые факты: сколько файлов какого типа лежит в БД и каков объём
+ * работы. Никаких содержательных суждений — их формулирует руководитель.
+ */
+function buildTechnicalSummary(
+  volume: VolumeAssessment | null,
+  dbAnalysis: DbAnalysisResult | null,
+) {
+  return {
+    volume: volume && {
+      charsWithSpaces: volume.bodyCharsWithSpaces,
+      charsNoSpaces: volume.bodyCharsNoSpaces,
+      footnoteChars: volume.footnoteChars,
+      threshold: volume.threshold,
+      requirementMet: volume.passed,
+      conceptChars: volume.conceptChars,
+      conceptThreshold: volume.conceptThreshold,
+      conceptRequirementMet: volume.conceptPassed,
+      breakdown: volume.breakdown,
+    },
+    database: {
+      accessible: dbAnalysis?.accessible ?? false,
+      error: dbAnalysis?.error || null,
+      // Формулировки под приложение 36: «Содержит ___ аудио/видеофайл(ов),
+      // ___ таблиц (выгрузка данных опроса и т.п.), ___ других файлов».
+      mediaFiles: dbAnalysis?.stats?.media ?? null,
+      tableFiles: dbAnalysis?.stats?.tables ?? null,
+      otherFiles: dbAnalysis?.stats
+        ? dbAnalysis.stats.documents + dbAnalysis.stats.other
+        : null,
+      totalFiles: dbAnalysis?.stats?.total ?? dbAnalysis?.fileCount ?? null,
+      disallowedFormats: dbAnalysis?.stats?.disallowedFormats ?? [],
+      media: dbAnalysis?.stats?.mediaFiles ?? [],
+    },
+  };
 }

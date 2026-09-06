@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { workTypeLabel } from '@/lib/programmes';
 import Link from 'next/link';
 import { parseJsonResponse } from '@/lib/http';
 
@@ -229,7 +230,7 @@ function ReportResult({ attempt }: { attempt: ReportAttempt }) {
           <div>
             <h2 className="text-lg font-bold text-blue-800">{attempt.student_name}</h2>
             <p className="text-sm text-slate-500 mt-1">
-              {attempt.work_type === 'project' ? 'Магистерский проект' : 'Магистерская диссертация'}
+              {workTypeLabel(attempt.work_type)}
               {' '}&middot; Попытка {attempt.attempt_number}
               {' '}&middot; {new Date(attempt.created_at).toLocaleDateString('ru-RU')}
             </p>

@@ -48,6 +48,9 @@ export async function POST(req: NextRequest) {
     const methodsJson = formData.get('methodsJson') as string || '{}';
     const usesAI = formData.get('usesAI') === 'true';
     const feedback = formData.get('feedback') as string || '';
+    const programme = (formData.get('programme') as string) || 'ik';
+    const workLang = (formData.get('workLang') as string) || 'ru';
+    const volumeJson = (formData.get('volumeJson') as string) || '';
     const file = formData.get('file') as File | null;
 
     if (!studentName || !workType || !status || !resultsJson) {
@@ -92,6 +95,9 @@ export async function POST(req: NextRequest) {
       uses_ai: usesAI,
       feedback: feedback,
       file_path: filePath,
+      programme: programme === 'riso' ? 'riso' : 'ik',
+      work_lang: workLang === 'en' ? 'en' : 'ru',
+      volume_json: volumeJson || undefined,
     });
 
     return NextResponse.json({ id: attemptId, attemptNumber, maxAttempts: 3 });

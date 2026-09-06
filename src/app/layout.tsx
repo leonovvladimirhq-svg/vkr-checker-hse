@@ -3,7 +3,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'Проверка ВКР — Сервис автоматической проверки',
-  description: 'Автоматическая проверка магистерских работ по чек-листу требований',
+  description: 'Автоматическая проверка ВКР по чек-листу образовательной программы',
 };
 
 export default function RootLayout({

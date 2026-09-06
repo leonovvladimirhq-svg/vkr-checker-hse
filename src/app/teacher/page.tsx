@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { saveAuth, readAuth, clearAuth } from '@/lib/authCache';
+import { PROGRAMMES, programmeForWorkType, workTypeLabel, workTypeShortLabel } from '@/lib/programmes';
 
 interface StudentSummary {
   id: number;
@@ -12,6 +13,8 @@ interface StudentSummary {
   attempt_number: number;
   last_date: string;
   wave: number;
+  /** 'ik' | 'riso'. У записей, созданных до появления РиСО, приходит 'ik'. */
+  programme?: string;
 }
 
 interface AttemptRow {
@@ -440,10 +443,12 @@ export default function TeacherPage() {
     const XLSX = await import('xlsx');
     const rows = data.students.map(s => ({
       'ФИО': s.student_name,
+      'Программа': PROGRAMMES[(s.programme === 'riso' ? 'riso' : programmeForWorkType(s.work_type))].label,
+      'Тип работы': workTypeShortLabel(s.work_type),
       'Статус': s.status === 'pass' ? 'Зачёт' : s.status === 'pending' ? 'Ожидает проверки' : 'Незачёт',
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols'] = [{ wch: 35 }, { wch: 20 }];
+    ws['!cols'] = [{ wch: 35 }, { wch: 34 }, { wch: 20 }, { wch: 20 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Студенты');
     XLSX.writeFile(wb, 'студенты_вкр.xlsx');
@@ -613,7 +618,10 @@ export default function TeacherPage() {
                           </span>
                         </td>
                         <td className="px-3 py-2.5 border-b border-slate-100 font-medium">{s.student_name}</td>
-                        <td className="px-3 py-2.5 border-b border-slate-100">{s.work_type === 'project' ? 'Проект' : 'Диссертация'}</td>
+                        <td className="px-3 py-2.5 border-b border-slate-100">
+                          <div>{workTypeShortLabel(s.work_type)}</div>
+                          <ProgrammeBadge programme={s.programme} workType={s.work_type} />
+                        </td>
                         <td className="px-3 py-2.5 border-b border-slate-100">
                           <StatusChip status={s.status} />
                         </td>
@@ -1058,7 +1066,7 @@ function AttemptDetailModal({ attempt, onClose, onApprove, onReject }: { attempt
           <div>
             <h2 className="text-lg font-bold text-blue-800">Результаты проверки</h2>
             <p className="text-sm text-slate-500 mt-1">
-              {attempt.student_name} &middot; {attempt.work_type === 'project' ? 'Магистерский проект' : 'Магистерская диссертация'} &middot; Попытка {attempt.attempt_number}
+              {attempt.student_name} &middot; {PROGRAMMES[programmeForWorkType(attempt.work_type)].label} &middot; {workTypeLabel(attempt.work_type)} &middot; Попытка {attempt.attempt_number}
             </p>
             <p className="text-xs text-slate-400 mt-1">
               {new Date(attempt.created_at).toLocaleString('ru-RU')}
@@ -1303,6 +1311,26 @@ function ReportSection({ message, setMessage }: { message: string; setMessage: (
 }
 
 // ============ ВСПОМОГАТЕЛЬНЫЕ КОМПОНЕНТЫ ============
+/**
+ * Бейдж образовательной программы в сводной таблице.
+ * У попыток, сохранённых до появления ОП РиСО, поля programme нет —
+ * тогда программа выводится из типа работы.
+ */
+function ProgrammeBadge({ programme, workType }: { programme?: string; workType: string }) {
+  const id = programme === 'riso' || programme === 'ik' ? programme : programmeForWorkType(workType);
+  const cfg = PROGRAMMES[id];
+  return (
+    <span
+      title={cfg.label}
+      className={`inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+        id === 'riso' ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'
+      }`}
+    >
+      {cfg.shortLabel}
+    </span>
+  );
+}
+
 function StatCard({ num, label, color }: { num: number; label: string; color: string }) {
   return (
     <div className="bg-white rounded-lg border border-slate-200 p-4 text-center">

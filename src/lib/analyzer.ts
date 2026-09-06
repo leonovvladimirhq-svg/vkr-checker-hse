@@ -1,12 +1,19 @@
 // ============================================================
 // Анализатор структуры ВКР через OpenAI GPT API
 // Поддержка gpt-5.2, o3-mini, gpt-4o-mini и др.
+//
+// Промпты разведены по образовательным программам:
+//   'ik'   — ОП «Интегрированные коммуникации» (магистратура), этот файл;
+//   'riso' — ОП «Реклама и связи с общественностью» (бакалавриат),
+//            см. ./riso-prompt.ts.
 // ============================================================
 
 import OpenAI from 'openai';
-import { WorkType, CheckItem, CheckResult } from './checklist';
+import { ProgrammeId, WorkType, WorkLang, CheckItem, CheckResult } from './checklist';
 import { ParsedDocument, prepareTextForGPT } from './parser';
 import { DbAnalysisResult } from './db-analyzer';
+import { buildRisoSystemPrompt, buildRisoTextChecks } from './riso-prompt';
+import { VolumeAssessment, volumeNote, conceptVolumeNote } from './volume';
 
 interface GPTCheckResult {
   [checkId: string]: {
@@ -18,7 +25,9 @@ interface GPTCheckResult {
 /**
  * Построение системного промпта для GPT
  */
-function buildSystemPrompt(): string {
+function buildSystemPrompt(programme: ProgrammeId): string {
+  if (programme === 'riso') return buildRisoSystemPrompt();
+
   return `Ты — система автоматической проверки структуры магистерских работ (ВКР) по чек-листу.
 Проверка основана на Методических рекомендациях ОП «Интегрированные коммуникации» НИУ ВШЭ (для набора 2024–2025 гг.).
 
@@ -75,10 +84,20 @@ function buildSystemPrompt(): string {
 /**
  * Построение промпта с пунктами проверки для конкретного типа работы
  */
-function buildCheckPrompt(type: WorkType, usesAI: boolean, doc: ParsedDocument, dbAnalysis?: DbAnalysisResult | null, checklist?: CheckItem[]): string {
+function buildCheckPrompt(
+  programme: ProgrammeId,
+  type: WorkType,
+  usesAI: boolean,
+  doc: ParsedDocument,
+  dbAnalysis?: DbAnalysisResult | null,
+  checklist?: CheckItem[],
+  lang: WorkLang = 'ru',
+): string {
   let checks = '';
 
-  if (type === 'project') {
+  if (programme === 'riso') {
+    checks = buildRisoTextChecks(lang);
+  } else if (type === 'project') {
     checks = `
 Проверяемые пункты МАГИСТЕРСКОГО ПРОЕКТА:
 - title_page: Титульный лист (название работы, ФИО студента, НИУ ВШЭ)
@@ -104,6 +123,20 @@ function buildCheckPrompt(type: WorkType, usesAI: boolean, doc: ParsedDocument, 
 - conclusion: Заключение. По методичке: выводы в контексте академической дискуссии, практические рекомендации, ограничения, перспективы будущих исследований.
 - bibliography: Список использованных источников и литературы
 - mixed_method: Исследование использует смешанный/мультимодальный подход (>=2 разных метода исследования). По методичке: эмпирическая глава МД должна быть выполнена в мультимодальном или смешанном дизайне.`;
+  }
+
+  // Пункты приложения к тексту работы (только ОП РиСО, приложение 35 пп. 2 и 6)
+  if (checklist) {
+    const appendixItems = checklist.filter(i => i.section === 'Приложения к тексту работы');
+    if (appendixItems.length > 0) {
+      checks += `
+
+Проверяемые пункты ПРИЛОЖЕНИЙ К ТЕКСТУ РАБОТЫ (ищи их в разделе «Приложение» самой ВКР, а не в папке базы данных):`;
+      for (const item of appendixItems) {
+        checks += `
+- ${item.id}: ${item.text}`;
+      }
+    }
   }
 
   if (usesAI) {
@@ -202,14 +235,20 @@ function getModelParams(model: string): {
 /**
  * Вызов OpenAI API для анализа документа
  */
-export async function analyzeDocument(
-  type: WorkType,
-  usesAI: boolean,
-  doc: ParsedDocument,
-  apiKey?: string,
-  dbAnalysis?: DbAnalysisResult | null,
-  checklist?: CheckItem[],
-): Promise<GPTCheckResult> {
+export interface AnalyzeOptions {
+  programme: ProgrammeId;
+  type: WorkType;
+  usesAI: boolean;
+  doc: ParsedDocument;
+  lang?: WorkLang;
+  apiKey?: string;
+  dbAnalysis?: DbAnalysisResult | null;
+  checklist?: CheckItem[];
+}
+
+export async function analyzeDocument(opts: AnalyzeOptions): Promise<GPTCheckResult> {
+  const { programme, type, usesAI, doc, apiKey, dbAnalysis, checklist } = opts;
+  const lang: WorkLang = opts.lang || 'ru';
   const key = apiKey || process.env.OPENAI_API_KEY;
   if (!key) throw new Error('OpenAI API Key не указан');
 
@@ -222,8 +261,8 @@ export async function analyzeDocument(
   const requestParams: any = {
     model,
     messages: [
-      { role: 'system', content: buildSystemPrompt() },
-      { role: 'user', content: buildCheckPrompt(type, usesAI, doc, dbAnalysis, checklist) },
+      { role: 'system', content: buildSystemPrompt(programme) },
+      { role: 'user', content: buildCheckPrompt(programme, type, usesAI, doc, dbAnalysis, checklist, lang) },
     ],
     ...(supportsTemperature ? { temperature: 0.1 } : {}),
   };
@@ -250,7 +289,7 @@ export async function analyzeDocument(
     );
     // Переносим system prompt в user message
     requestParams.messages[0].content =
-      buildSystemPrompt() + '\n\n' + requestParams.messages[0].content;
+      buildSystemPrompt(programme) + '\n\n' + requestParams.messages[0].content;
   }
 
   const completion = await openai.chat.completions.create(requestParams);
@@ -271,17 +310,42 @@ export async function analyzeDocument(
 /**
  * Объединение результатов GPT с чек-листом
  */
-export function mergeResults(
-  checklist: CheckItem[],
-  gptResults: GPTCheckResult,
-  dbLink: string,
-  dbAnalysis?: DbAnalysisResult | null,
-  presLink?: string,
-): CheckResult[] {
+export interface MergeOptions {
+  checklist: CheckItem[];
+  gptResults: GPTCheckResult;
+  dbLink: string;
+  dbAnalysis?: DbAnalysisResult | null;
+  presLink?: string;
+  /** Детерминированный подсчёт объёма (ОП РиСО). GPT к нему не допускается. */
+  volume?: VolumeAssessment | null;
+  /** Минимальная длительность аудио/видеозаписей по регламенту программы. */
+  mediaMinMinutes?: number;
+}
+
+export function mergeResults(opts: MergeOptions): CheckResult[] {
+  const { checklist, gptResults, dbLink, dbAnalysis, presLink, volume } = opts;
+
   return checklist.map(item => {
     // Фиксированные пункты (отмечено студентом)
     if (item.fixed) {
       return { ...item, passed: true, note: 'Отмечено студентом' };
+    }
+
+    // Объём работы — считается программно, ответ GPT игнорируется полностью.
+    if (item.id === 'volume_total') {
+      if (!volume) return { ...item, passed: null, note: 'Объём не рассчитан' };
+      return { ...item, passed: volume.passed, note: volumeNote(volume) };
+    }
+    if (item.id === 'volume_concept') {
+      if (!volume) return { ...item, passed: null, note: 'Объём не рассчитан' };
+      return { ...item, passed: volume.conceptPassed, note: conceptVolumeNote(volume) };
+    }
+
+    // Продолжительность записей: точную длительность публичный API Яндекс.Диска
+    // не отдаёт, поэтому пункт остаётся ручным — но преподавателю показываем
+    // ориентировочную оценку по размеру файлов, чтобы не слушать каждую запись.
+    if (item.id.endsWith('_duration')) {
+      return { ...item, passed: null, note: mediaDurationNote(dbAnalysis, opts.mediaMinMinutes) };
     }
 
     // Ссылка на презентацию: содержание невозможно проверить автоматически
@@ -330,6 +394,11 @@ export function mergeResults(
     // GPT-проверяемые пункты
     const gptResult = gptResults[item.id];
     if (gptResult) {
+      // Необязательные пункты («не обязательно» в регламенте) не могут дать «незачёт»:
+      // невыполнение отражаем как замечание для преподавателя, а не как провал.
+      if (item.optional && gptResult.passed === false) {
+        return { ...item, passed: null, note: `Не обнаружено (по регламенту не обязательно). ${gptResult.note || ''}`.trim() };
+      }
       return { ...item, passed: gptResult.passed, note: gptResult.note || '' };
     }
 
@@ -348,4 +417,38 @@ export function mergeResults(
 
     return { ...item, passed: false, note: 'Не удалось проверить автоматически' };
   });
+}
+
+/**
+ * Пояснение к пунктам продолжительности аудио/видеозаписей.
+ *
+ * Публичный API Яндекс.Диска не возвращает длительность медиафайлов, а сами
+ * файлы (сотни мегабайт) сервис принципиально не скачивает. Поэтому пункт
+ * остаётся ручным, но преподаватель получает ориентировочную оценку по размеру
+ * файла — этого достаточно, чтобы увидеть заведомо короткие записи и не
+ * прослушивать все подряд. Оценка явно помечена как оценка.
+ */
+function mediaDurationNote(
+  dbAnalysis: DbAnalysisResult | null | undefined,
+  minMinutes?: number,
+): string {
+  const stats = dbAnalysis?.stats;
+  if (!stats || stats.mediaFiles.length === 0) {
+    return 'Требуется ручная проверка — аудио/видеофайлы в базе данных не обнаружены или БД недоступна';
+  }
+
+  const estimated = stats.mediaFiles.filter(m => m.estMinutes !== null);
+  if (estimated.length === 0) {
+    return `Требуется ручная проверка: ${stats.mediaFiles.length} медиафайл(ов), длительность по размеру не оценивается (видеоформаты)`;
+  }
+
+  const threshold = minMinutes ?? 0;
+  const short = estimated.filter(m => (m.estMinutes as number) < threshold);
+  const durations = estimated.map(m => `${m.name} ≈ ${m.estMinutes} мин`).join('; ');
+
+  const head = short.length > 0
+    ? `Требуется ручная проверка. Ориентировочно короче ${threshold} мин: ${short.length} из ${estimated.length} файл(ов).`
+    : `Требуется ручная проверка. Все ${estimated.length} файл(ов) ориентировочно дольше ${threshold} мин.`;
+
+  return `${head} Оценка по размеру файла (не измерение): ${durations}`;
 }

@@ -23,7 +23,7 @@ function initSchema(db: Database.Database) {
     CREATE TABLE IF NOT EXISTS attempts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       student_name TEXT NOT NULL,
-      work_type TEXT NOT NULL CHECK(work_type IN ('project', 'dissertation')),
+      work_type TEXT NOT NULL CHECK(work_type IN ('project', 'dissertation', 'riso_thesis')),
       attempt_number INTEGER NOT NULL CHECK(attempt_number BETWEEN 1 AND 3),
       status TEXT NOT NULL CHECK(status IN ('pass', 'fail', 'pending')),
       results_json TEXT NOT NULL,
@@ -34,7 +34,14 @@ function initSchema(db: Database.Database) {
       methods_json TEXT,
       uses_ai INTEGER DEFAULT 0,
       wave INTEGER DEFAULT 1,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      feedback TEXT,
+      file_path TEXT,
+      teacher_review TEXT,
+      tech_comment TEXT,
+      programme TEXT NOT NULL DEFAULT 'ik',
+      work_lang TEXT NOT NULL DEFAULT 'ru',
+      volume_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS settings (
@@ -123,6 +130,78 @@ function initSchema(db: Database.Database) {
     console.error('Migration tech_comment error (non-critical):', e);
   }
 
+  // Миграция: поддержка нескольких образовательных программ (ОП ИК + ОП РиСО).
+  // 1) Колонка programme: 'ik' | 'riso'. Все существующие записи — ОП ИК.
+  try {
+    const cols = db.prepare("PRAGMA table_info(attempts)").all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'programme')) {
+      db.exec("ALTER TABLE attempts ADD COLUMN programme TEXT NOT NULL DEFAULT 'ik'");
+    }
+    if (!cols.some(c => c.name === 'work_lang')) {
+      db.exec("ALTER TABLE attempts ADD COLUMN work_lang TEXT NOT NULL DEFAULT 'ru'");
+    }
+    if (!cols.some(c => c.name === 'volume_json')) {
+      db.exec("ALTER TABLE attempts ADD COLUMN volume_json TEXT");
+    }
+  } catch (e) {
+    console.error('Migration programme columns error (non-critical):', e);
+  }
+
+  // 2) Расширить CHECK по work_type: у ОП РиСО тип работы 'riso_thesis'.
+  // SQLite не умеет менять CHECK через ALTER — пересоздаём таблицу.
+  // Копируем по явному списку колонок (а не SELECT *), чтобы миграция не
+  // ломалась при следующем добавлении полей.
+  try {
+    const tableInfo = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='attempts'"
+    ).get() as { sql: string } | undefined;
+
+    if (tableInfo?.sql && !tableInfo.sql.includes("'riso_thesis'")) {
+      const cols = (db.prepare("PRAGMA table_info(attempts)").all() as Array<{ name: string }>)
+        .map(c => c.name);
+
+      const columnDefs = [
+        'id INTEGER PRIMARY KEY AUTOINCREMENT',
+        'student_name TEXT NOT NULL',
+        "work_type TEXT NOT NULL CHECK(work_type IN ('project', 'dissertation', 'riso_thesis'))",
+        'attempt_number INTEGER NOT NULL CHECK(attempt_number BETWEEN 1 AND 3)',
+        "status TEXT NOT NULL CHECK(status IN ('pass', 'fail', 'pending'))",
+        'results_json TEXT NOT NULL',
+        'extracted_text_preview TEXT',
+        'file_name TEXT',
+        'db_link TEXT',
+        'pres_link TEXT',
+        'methods_json TEXT',
+        'uses_ai INTEGER DEFAULT 0',
+        'wave INTEGER DEFAULT 1',
+        'created_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+        'feedback TEXT',
+        'file_path TEXT',
+        'teacher_review TEXT',
+        'tech_comment TEXT',
+        "programme TEXT NOT NULL DEFAULT 'ik'",
+        "work_lang TEXT NOT NULL DEFAULT 'ru'",
+        'volume_json TEXT',
+      ];
+      // Оставляем только те определения, для которых колонка реально есть,
+      // и переносим ровно их — так лишняя/неизвестная колонка не уронит INSERT.
+      const defs = columnDefs.filter(d => cols.includes(d.split(' ')[0]));
+      const colList = defs.map(d => `"${d.split(' ')[0]}"`).join(', ');
+
+      db.exec('BEGIN');
+      db.exec('ALTER TABLE attempts RENAME TO attempts_old');
+      db.exec(`CREATE TABLE attempts (${defs.join(', ')})`);
+      db.exec(`INSERT INTO attempts (${colList}) SELECT ${colList} FROM attempts_old`);
+      db.exec('DROP TABLE attempts_old');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_attempts_student ON attempts(student_name)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_attempts_date ON attempts(created_at)');
+      db.exec('COMMIT');
+    }
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch { /* транзакция уже закрыта */ }
+    console.error('Migration work_type CHECK error (non-critical):', e);
+  }
+
   // Default settings
   const insertSetting = db.prepare(
     'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)'
@@ -151,6 +230,9 @@ export interface AttemptRow {
   feedback: string | null;
   teacher_review: string | null;
   tech_comment: string | null;
+  programme: string;
+  work_lang: string;
+  volume_json: string | null;
   created_at: string;
 }
 
@@ -184,12 +266,16 @@ export function insertAttempt(data: {
   wave?: number;
   feedback?: string;
   file_path?: string;
+  programme?: string;
+  work_lang?: string;
+  volume_json?: string;
 }): number {
   const db = getDb();
   const stmt = db.prepare(`
     INSERT INTO attempts (student_name, work_type, attempt_number, status, results_json,
-      extracted_text_preview, file_name, db_link, pres_link, methods_json, uses_ai, wave, feedback, file_path)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      extracted_text_preview, file_name, db_link, pres_link, methods_json, uses_ai, wave, feedback, file_path,
+      programme, work_lang, volume_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
     data.student_name,
@@ -205,7 +291,10 @@ export function insertAttempt(data: {
     data.uses_ai ? 1 : 0,
     data.wave || 1,
     data.feedback || null,
-    data.file_path || null
+    data.file_path || null,
+    data.programme || 'ik',
+    data.work_lang || 'ru',
+    data.volume_json || null
   );
   return result.lastInsertRowid as number;
 }
@@ -218,10 +307,11 @@ export function getAllStudentsSummary(): Array<{
   attempt_number: number;
   last_date: string;
   wave: number;
+  programme: string;
 }> {
   const db = getDb();
   return db.prepare(`
-    SELECT id, student_name, work_type, status, attempt_number, created_at as last_date, wave
+    SELECT id, student_name, work_type, status, attempt_number, created_at as last_date, wave, programme
     FROM attempts
     WHERE id IN (
       SELECT MAX(id) FROM attempts GROUP BY TRIM(student_name)

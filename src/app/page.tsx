@@ -3,6 +3,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { saveAuth, readAuth, clearAuth } from '@/lib/authCache';
+import { PROGRAMMES, DEFAULT_PROGRAMME, workTypeLabel } from '@/lib/programmes';
+import type { ProgrammeId, WorkType, WorkLang } from '@/lib/checklist';
 
 // Типы
 interface CheckResultItem {
@@ -13,9 +15,36 @@ interface CheckResultItem {
   note: string;
 }
 
+interface TechnicalSummary {
+  volume: {
+    charsWithSpaces: number;
+    charsNoSpaces: number;
+    footnoteChars: number;
+    threshold: number;
+    requirementMet: boolean;
+    conceptChars: number | null;
+    conceptThreshold: number;
+    conceptRequirementMet: boolean | null;
+  } | null;
+  database: {
+    accessible: boolean;
+    error: string | null;
+    mediaFiles: number | null;
+    tableFiles: number | null;
+    otherFiles: number | null;
+    totalFiles: number | null;
+    disallowedFormats: string[];
+    media: Array<{ name: string; size: number; ext: string; estMinutes: number | null; formatAllowed: boolean }>;
+  };
+}
+
 interface CheckResponse {
   studentName: string;
+  programme: ProgrammeId;
+  programmeLabel: string;
   workType: string;
+  workLang: WorkLang;
+  technical: TechnicalSummary;
   status: 'pass' | 'fail' | 'pending';
   results: CheckResultItem[];
   summary: { total: number; passed: number; failed: number; manual: number };
@@ -34,6 +63,9 @@ interface CheckResponse {
     usesAI: boolean;
     fileName: string;
     resultsJson: string;
+    programme: string;
+    workLang: string;
+    volumeJson: string;
   };
   error?: string;
 }
@@ -46,8 +78,10 @@ export default function StudentPage() {
   const [loginError, setLoginError] = useState('');
 
   // Форма
+  const [programmeId, setProgrammeId] = useState<ProgrammeId>(DEFAULT_PROGRAMME);
   const [studentName, setStudentName] = useState('');
-  const [workType, setWorkType] = useState<'project' | 'dissertation' | ''>('');
+  const [workType, setWorkType] = useState<WorkType | ''>('');
+  const [workLang, setWorkLang] = useState<WorkLang>('ru');
   const [usesAI, setUsesAI] = useState(false);
   const [dbLink, setDbLink] = useState('');
   const [presLink, setPresLink] = useState('');
@@ -95,13 +129,32 @@ export default function StudentPage() {
     setPasswordInput('');
   };
 
+  // Конфигурация выбранной образовательной программы
+  const programme = PROGRAMMES[programmeId];
+  const needsPresentation = workType ? programme.requiresPresentation(workType as WorkType) : false;
+  const minMethods = workType ? programme.minMethods(workType as WorkType) : 1;
+
+  // Смена программы сбрасывает всё, что от неё зависит: у программ разные
+  // типы работ и разные наборы методов, и «залипший» выбор ушёл бы в API.
+  const handleProgrammeChange = (id: ProgrammeId) => {
+    if (id === programmeId) return;
+    setProgrammeId(id);
+    const types = PROGRAMMES[id].workTypes;
+    setWorkType(types.length === 1 ? types[0].value : '');
+    setEmpMethods([]);
+    setCompMethods([]);
+    setOtherMethodName('');
+    setPresLink('');
+    setWorkLang('ru');
+    setError('');
+  };
+
   // Валидация формы
   const nameWords = studentName.trim().split(/\s+/).filter(Boolean).length;
   const hasOtherMethod = empMethods.includes('other') || compMethods.includes('other_comp');
   const isFormValid = nameWords >= 2 && workType && file && dbLink.trim() &&
-    (workType !== 'project' || presLink.trim()) &&
-    empMethods.length > 0 &&
-    (workType !== 'dissertation' || empMethods.length >= 2) &&
+    (!needsPresentation || presLink.trim()) &&
+    empMethods.length >= minMethods &&
     (!hasOtherMethod || otherMethodName.trim().length > 0);
 
   // Обработка методов
@@ -143,7 +196,9 @@ export default function StudentPage() {
     try {
       const formData = new FormData();
       formData.append('studentName', studentName);
+      formData.append('programme', programmeId);
       formData.append('workType', workType);
+      formData.append('workLang', workLang);
       formData.append('usesAI', String(usesAI));
       formData.append('dbLink', dbLink);
       formData.append('presLink', presLink);
@@ -197,6 +252,9 @@ export default function StudentPage() {
       const formData = new FormData();
       formData.append('studentName', result.studentName);
       formData.append('workType', result.workType);
+      formData.append('programme', result.saveData.programme);
+      formData.append('workLang', result.saveData.workLang);
+      formData.append('volumeJson', result.saveData.volumeJson);
       formData.append('status', result.status);
       formData.append('resultsJson', result.saveData.resultsJson);
       formData.append('extractedTextPreview', result.saveData.extractedTextPreview);
@@ -308,7 +366,7 @@ export default function StudentPage() {
               <div>
                 <h2 className="text-lg font-bold text-blue-800">Результаты проверки</h2>
                 <p className="text-sm text-slate-500 mt-1">
-                  {result.studentName} &middot; {result.workType === 'project' ? 'Магистерский проект' : 'Магистерская диссертация'} &middot; {new Date().toLocaleDateString('ru-RU')}
+                  {result.studentName} &middot; {result.programmeLabel} &middot; {workTypeLabel(result.workType)} &middot; {new Date().toLocaleDateString('ru-RU')}
                 </p>
               </div>
               <div className={`px-6 py-3 rounded-lg text-lg font-bold border-2 ${
@@ -330,6 +388,9 @@ export default function StudentPage() {
             <div className="bg-slate-50 rounded-lg p-3 mb-4 text-xs text-slate-600">
               <span className="font-semibold">Документ:</span> {documentInfo.fileName} &middot; {documentInfo.wordCount.toLocaleString()} слов &middot; ~{documentInfo.pageEstimate} стр. &middot; {documentInfo.headingsFound} заголовков найдено
             </div>
+
+            {/* Технические параметры — основа для отзыва руководителя */}
+            <TechnicalBlock technical={result.technical} />
 
             {/* Прогресс */}
             <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden mb-1">
@@ -438,9 +499,39 @@ export default function StudentPage() {
           </div>
         )}
 
-        {/* Шаг 1: Информация */}
+        {/* Шаг 1: Образовательная программа */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6">
-          <h2 className="text-lg font-bold text-blue-800 mb-4">Шаг 1. Информация о работе</h2>
+          <h2 className="text-lg font-bold text-blue-800 mb-1">Шаг 1. Образовательная программа</h2>
+          <p className="text-xs text-slate-500 mb-4">
+            От программы зависят чек-лист, требования к объёму и состав базы данных — выберите свою программу
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {Object.values(PROGRAMMES).map(p => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => handleProgrammeChange(p.id)}
+                className={`text-left rounded-xl border-2 px-4 py-3 transition ${
+                  programmeId === p.id
+                    ? 'border-blue-600 bg-blue-50'
+                    : 'border-slate-200 hover:border-blue-300 bg-white'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className={`w-4 h-4 rounded-full border-2 flex-shrink-0 ${
+                    programmeId === p.id ? 'border-blue-600 bg-blue-600' : 'border-slate-300'
+                  }`} />
+                  <span className="text-sm font-semibold">{p.label}</span>
+                </div>
+                <p className="text-xs text-slate-500 mt-1.5 ml-6">{p.hint}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Шаг 2: Информация */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6">
+          <h2 className="text-lg font-bold text-blue-800 mb-4">Шаг 2. Информация о работе</h2>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div>
@@ -452,14 +543,31 @@ export default function StudentPage() {
             </div>
             <div>
               <label className="block text-sm font-semibold mb-1.5">Тип работы *</label>
-              <select value={workType} onChange={e => setWorkType(e.target.value as any)}
+              <select value={workType} onChange={e => setWorkType(e.target.value as WorkType | '')}
                 className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 bg-white">
-                <option value="">— Выберите —</option>
-                <option value="project">Магистерский проект</option>
-                <option value="dissertation">Магистерская диссертация</option>
+                {programme.workTypes.length > 1 && <option value="">— Выберите —</option>}
+                {programme.workTypes.map(w => (
+                  <option key={w.value} value={w.value}>{w.label}</option>
+                ))}
               </select>
             </div>
           </div>
+
+          {programme.hasLangChoice && (
+            <div className="mb-4 max-w-xs">
+              <label className="block text-sm font-semibold mb-1.5">Язык работы *</label>
+              <select value={workLang} onChange={e => setWorkLang(e.target.value as WorkLang)}
+                className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 bg-white">
+                <option value="ru">Русский</option>
+                <option value="en">Английский</option>
+              </select>
+              <p className="text-xs text-slate-400 mt-1">
+                От языка зависит порог объёма: {programme.volumeThresholds
+                  ? `${programme.volumeThresholds.ru.toLocaleString('ru-RU')} знаков (рус.) / ${programme.volumeThresholds.en.toLocaleString('ru-RU')} знаков (англ.)`
+                  : '—'}
+              </p>
+            </div>
+          )}
 
           <div className="mb-4">
             <label className="flex items-center gap-2 cursor-pointer">
@@ -474,24 +582,15 @@ export default function StudentPage() {
             <div className="mb-4">
               <h3 className="text-sm font-semibold mb-2">Методы исследования (эмпирическая часть) *</h3>
               <div className="bg-blue-50 border border-blue-200 rounded-lg px-3.5 py-2.5 text-xs text-blue-700 mb-2">
-                {workType === 'dissertation'
-                  ? 'Диссертация: смешанный/мультимодальный подход (минимум 2 метода)'
+                {minMethods >= 2
+                  ? `Смешанный/мультимодальный подход: минимум ${minMethods} метода`
                   : 'Выберите хотя бы один метод'}
               </div>
-              {[
-                { val: 'interviews', label: 'Глубинные интервью' },
-                { val: 'focus_groups', label: 'Фокус-группы' },
-                { val: 'text_analysis', label: 'Методы анализа текстов (контент-анализ, дискурс-анализ и др.)' },
-                { val: 'survey', label: 'Опрос' },
-                { val: 'quant_content', label: 'Количественный контент-анализ' },
-                { val: 'monitoring', label: 'Мониторинговый анализ' },
-                { val: 'expert_interview', label: 'Экспертное интервью' },
-                { val: 'other', label: 'Другое' },
-              ].map(m => (
-                <label key={m.val} className="flex items-center gap-2 py-1 cursor-pointer">
-                  <input type="checkbox" checked={empMethods.includes(m.val)}
-                    onChange={() => toggleMethod(empMethods, setEmpMethods, m.val)}
-                    className="w-4 h-4 accent-blue-600" />
+              {programme.methods.map(m => (
+                <label key={m.value} className="flex items-start gap-2 py-1 cursor-pointer">
+                  <input type="checkbox" checked={empMethods.includes(m.value)}
+                    onChange={() => toggleMethod(empMethods, setEmpMethods, m.value)}
+                    className="w-4 h-4 accent-blue-600 mt-0.5" />
                   <span className="text-sm">{m.label}</span>
                 </label>
               ))}
@@ -508,19 +607,14 @@ export default function StudentPage() {
             </div>
           )}
 
-          {/* Методы анализа конкурентов (только проект) */}
-          {workType === 'project' && (
+          {/* Методы анализа конкурентов — только для программ, где этот блок есть (ОП ИК, проект) */}
+          {workType === 'project' && programme.competitorMethods.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold mb-2">Методы исследования (анализ конкурентов)</h3>
-              {[
-                { val: 'text_analysis_comp', label: 'Другие методы анализа текста' },
-                { val: 'quant_content_comp', label: 'Количественный контент-анализ' },
-                { val: 'expert_interview_comp', label: 'Экспертное интервью' },
-                { val: 'other_comp', label: 'Другое' },
-              ].map(m => (
-                <label key={m.val} className="flex items-center gap-2 py-1 cursor-pointer">
-                  <input type="checkbox" checked={compMethods.includes(m.val)}
-                    onChange={() => toggleMethod(compMethods, setCompMethods, m.val)}
+              {programme.competitorMethods.map(m => (
+                <label key={m.value} className="flex items-center gap-2 py-1 cursor-pointer">
+                  <input type="checkbox" checked={compMethods.includes(m.value)}
+                    onChange={() => toggleMethod(compMethods, setCompMethods, m.value)}
                     className="w-4 h-4 accent-blue-600" />
                   <span className="text-sm">{m.label}</span>
                 </label>
@@ -531,7 +625,7 @@ export default function StudentPage() {
 
         {/* Шаг 2: Загрузка */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6">
-          <h2 className="text-lg font-bold text-blue-800 mb-4">Шаг 2. Загрузка файлов и ссылок</h2>
+          <h2 className="text-lg font-bold text-blue-800 mb-4">Шаг 3. Загрузка файлов и ссылок</h2>
 
           <div className="mb-4">
             <label className="block text-sm font-semibold mb-1.5">Файл работы (.docx или .pdf) *</label>
@@ -563,7 +657,7 @@ export default function StudentPage() {
                 placeholder="https://disk.yandex.ru/d/..."
                 className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
             </div>
-            {workType === 'project' && (
+            {needsPresentation && (
               <div>
                 <label className="block text-sm font-semibold mb-1.5">Ссылка на презентацию *</label>
                 <input type="url" value={presLink} onChange={e => setPresLink(e.target.value)}
@@ -590,6 +684,80 @@ export default function StudentPage() {
   );
 }
 
+// ============ ТЕХНИЧЕСКИЕ ПАРАМЕТРЫ ============
+// Блок с измеримыми фактами: объём работы и состав базы данных.
+// По договорённости встречи 10.07.2026 именно эту часть отзыва
+// автоматизируем — содержательную оценку даёт научный руководитель.
+function TechnicalBlock({ technical }: { technical?: TechnicalSummary }) {
+  if (!technical) return null;
+  const { volume, database } = technical;
+  if (!volume && !database.accessible) return null;
+
+  const nf = (n: number) => n.toLocaleString('ru-RU');
+
+  return (
+    <div className="border border-slate-200 rounded-xl p-4 mb-6 bg-white">
+      <h3 className="text-sm font-bold text-slate-700 mb-3">Технические параметры работы</h3>
+
+      {volume && (
+        <div className="mb-3">
+          <div className="text-xs font-semibold text-slate-500 mb-1">Объём</div>
+          <div className="text-sm">
+            <span className={volume.requirementMet ? 'text-emerald-700' : 'text-red-700'}>
+              {volume.requirementMet ? '✓' : '✗'} {nf(volume.charsWithSpaces)} знаков с пробелами
+            </span>
+            <span className="text-slate-500"> при требовании не менее {nf(volume.threshold)}</span>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            Считается тело работы со сносками ({nf(volume.footnoteChars)} знаков), без титульного листа,
+            содержания, списка литературы и приложений. Без пробелов: {nf(volume.charsNoSpaces)}.
+          </p>
+          <div className="text-sm mt-1.5">
+            {volume.conceptChars === null ? (
+              <span className="text-amber-700">
+                ⊘ Концептуальная глава: границы не распознаны, объём проверяется вручную
+                (требование — не менее {nf(volume.conceptThreshold)} знаков)
+              </span>
+            ) : (
+              <span className={volume.conceptRequirementMet ? 'text-emerald-700' : 'text-red-700'}>
+                {volume.conceptRequirementMet ? '✓' : '✗'} Концептуальная глава: {nf(volume.conceptChars)} знаков
+                <span className="text-slate-500"> при требовании не менее {nf(volume.conceptThreshold)}</span>
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <div className="text-xs font-semibold text-slate-500 mb-1">База данных</div>
+        {database.accessible ? (
+          <>
+            <p className="text-sm">
+              Содержит {database.mediaFiles ?? 0} аудио/видеофайл(ов), {database.tableFiles ?? 0} таблиц,{' '}
+              {database.otherFiles ?? 0} других файлов (всего {database.totalFiles ?? 0}).
+            </p>
+            {database.disallowedFormats.length > 0 && (
+              <p className="text-xs text-amber-700 mt-1">
+                Форматы вне списка приложения 35: {database.disallowedFormats.join(', ')}
+              </p>
+            )}
+            {database.media.length > 0 && (
+              <p className="text-xs text-slate-500 mt-1">
+                Длительность записей оценена по размеру файлов и требует проверки вручную —
+                публичный API Яндекс.Диска её не возвращает.
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="text-sm text-red-700">
+            Не удалось открыть базу данных{database.error ? `: ${database.error}` : ''}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ============ HEADER ============
 function Header({ onLogout }: { onLogout?: () => void }) {
   return (
@@ -597,7 +765,7 @@ function Header({ onLogout }: { onLogout?: () => void }) {
       <div className="max-w-3xl mx-auto px-6 py-5 flex justify-between items-center">
         <div>
           <h1 className="text-xl font-bold">Проверка ВКР</h1>
-          <p className="text-xs opacity-75 mt-0.5">Автоматическая проверка магистерских работ по чек-листу</p>
+          <p className="text-xs opacity-75 mt-0.5">Автоматическая проверка ВКР по чек-листу образовательной программы</p>
         </div>
         <nav className="flex gap-1 print:hidden">
           <span className="bg-white/30 px-4 py-2 rounded-lg text-sm font-medium">Студент</span>

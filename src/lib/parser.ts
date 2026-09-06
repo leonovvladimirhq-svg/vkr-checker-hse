@@ -11,6 +11,7 @@ export interface VolumeBreakdown {
   biblioFound: boolean;
   appendixFound: boolean;
   footnotesFound: boolean;
+  conceptFound: boolean;
 }
 
 export interface ParsedDocument {
@@ -27,6 +28,9 @@ export interface ParsedDocument {
   bodyCharCountNoSpaces: number;
   appendixWordCount: number;
   footnoteCharCount: number; // знаки сносок (с пробелами), уже включены в bodyCharCountWithSpaces
+  // Объём концептуальной (первой) главы, знаков с пробелами.
+  // null — границы главы не распознаны (проверка уходит в ручную).
+  conceptCharCount: number | null;
   volumeBreakdown: VolumeBreakdown;
 }
 
@@ -110,6 +114,7 @@ export async function parseDocx(buffer: Buffer): Promise<ParsedDocument> {
     bodyCharCountNoSpaces: volume.bodyCharCountNoSpaces,
     appendixWordCount: volume.appendixWordCount,
     footnoteCharCount: volume.footnoteCharCount,
+    conceptCharCount: volume.conceptCharCount,
     volumeBreakdown: volume.breakdown,
   };
 }
@@ -147,6 +152,7 @@ export async function parsePdf(buffer: Buffer): Promise<ParsedDocument> {
     bodyCharCountNoSpaces: volume.bodyCharCountNoSpaces,
     appendixWordCount: volume.appendixWordCount,
     footnoteCharCount: volume.footnoteCharCount,
+    conceptCharCount: volume.conceptCharCount,
     volumeBreakdown: volume.breakdown,
   };
 }
@@ -202,6 +208,7 @@ interface BodyVolumeResult {
   bodyCharCountNoSpaces: number;
   appendixWordCount: number;
   footnoteCharCount: number;
+  conceptCharCount: number | null;
   breakdown: VolumeBreakdown;
 }
 
@@ -220,18 +227,27 @@ export function computeBodyVolume(text: string, footnotesText: string = ''): Bod
     biblioFound: false,
     appendixFound: false,
     footnotesFound: false,
+    conceptFound: false,
   };
 
-  // Эвристика титульного листа: упоминание «Высшая школа экономики» / «Магистерская» в первых ~2000 символов
+  // Эвристика титульного листа: упоминание «Высшая школа экономики» / «Магистерская»
+  // в первых ~2000 символов. Английские маркеры нужны для работ на английском языке
+  // (ОП РиСО, п. 1.26: ВКР может быть выполнена и защищена на английском, порог 90 000).
   const head = text.substring(0, 2000);
-  if (/высшая школа экономики|национальный исследовательский университет|магистерская/i.test(head)) {
+  if (/высшая школа экономики|национальный исследовательский университет|магистерская|higher school of economics|national research university/i.test(head)) {
     breakdown.titlePageDetected = true;
   }
 
-  // Регексы маркеров разделов — гибкие (учитываем кавычки, переносы, регистр)
-  const introRe = /(^|\n)\s*(введение)\s*\n/i;
-  const biblioRe = /(^|\n)\s*(список\s+(использованных\s+)?(литературы|источников(\s+и\s+литературы)?)|библиограф\w+|список\s+литературы)\s*\n/i;
-  const appendixRe = /(^|\n)\s*(приложения?|приложение\s+[№a-zа-я0-9])\s*(\n|$)/i;
+  // Регексы маркеров разделов — гибкие (учитываем кавычки, переносы, регистр).
+  // Английские варианты обязательны: без них у англоязычной работы границы тела
+  // не находятся вовсе и в объём попадают титульник, оглавление, список
+  // источников и приложения — то есть цифра завышается на десятки тысяч знаков.
+  const introRe = /(^|\n)\s*(введение|introduction)\s*\n/i;
+  const biblioRe = /(^|\n)\s*(список\s+(использованных\s+)?(литературы|источников(\s+и\s+литературы)?)|библиограф\w+|список\s+литературы|references|bibliography|list\s+of\s+references)\s*\n/i;
+  // Было `приложения?` — это не покрывало самую частую форму «Приложение»
+  // (regex останавливался на «приложени»), из-за чего приложения не отсекались
+  // от тела работы. Правильный класс — [еяй].
+  const appendixRe = /(^|\n)\s*(приложени[еяй]|приложение\s+[№a-zа-я0-9]|appendix(\s+[a-z0-9])?|appendices)\s*(\n|$)/i;
 
   const introMatch = text.match(introRe);
   const biblioMatch = text.match(biblioRe);
@@ -278,12 +294,53 @@ export function computeBodyVolume(text: string, footnotesText: string = ''): Bod
     appendixWordCount = appendixText.split(/\s+/).filter(w => w.length > 0).length;
   }
 
+  // Объём концептуальной (первой) главы — от «Глава 1» до «Глава 2» внутри тела работы.
+  // Нужен для критерия 2 приложения 39 Программы практики ОП РиСО (>= 15 000 знаков).
+  const conceptCharCount = computeConceptCharCount(text, bodyStart, bodyEnd);
+  breakdown.conceptFound = conceptCharCount !== null;
+
   return {
     bodyWordCount,
     bodyCharCountWithSpaces,
     bodyCharCountNoSpaces,
     appendixWordCount,
     footnoteCharCount,
+    conceptCharCount,
     breakdown,
   };
+}
+
+/**
+ * Объём первой (концептуальной) главы в знаках с пробелами.
+ *
+ * Границы ищутся по заголовкам «Глава 1…» / «Глава 2…» (римские цифры тоже
+ * поддерживаются) ВНУТРИ тела работы — так оглавление, где те же строки идут
+ * с номерами страниц, не мешает: тело начинается с «Введение», а оглавление
+ * расположено выше.
+ *
+ * Если заголовки не распознаны (нестандартная нумерация — «1. Название»,
+ * «Раздел 1» и т.п.) — возвращает null, и пункт уходит на ручную проверку.
+ * Лучше честный «требуется проверка», чем неверная цифра в отзыве.
+ */
+export function computeConceptCharCount(
+  text: string,
+  bodyStart: number,
+  bodyEnd: number,
+): number | null {
+  const body = text.substring(bodyStart, bodyEnd);
+
+  const ch1 = body.match(/(^|\n)[ \t]*(?:глава|chapter)[ \t]*(?:1|i)(?![0-9ivx])/i);
+  if (!ch1 || ch1.index === undefined) return null;
+
+  const afterCh1 = ch1.index + ch1[0].length;
+  const rest = body.substring(afterCh1);
+  const ch2 = rest.match(/(^|\n)[ \t]*(?:глава|chapter)[ \t]*(?:2|ii)(?![0-9ivx])/i);
+  if (!ch2 || ch2.index === undefined) return null;
+
+  const conceptText = body.substring(ch1.index, afterCh1 + ch2.index);
+  // Слишком короткий фрагмент — почти наверняка попадание в оглавление,
+  // а не в реальную главу. Не выдаём заведомо ложную цифру.
+  if (conceptText.replace(/\s+/g, '').length < 500) return null;
+
+  return conceptText.length;
 }
