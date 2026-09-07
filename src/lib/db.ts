@@ -41,7 +41,9 @@ function initSchema(db: Database.Database) {
       tech_comment TEXT,
       programme TEXT NOT NULL DEFAULT 'ik',
       work_lang TEXT NOT NULL DEFAULT 'ru',
-      volume_json TEXT
+      volume_json TEXT,
+      work_title TEXT,
+      db_stats_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS settings (
@@ -143,6 +145,14 @@ function initSchema(db: Database.Database) {
     if (!cols.some(c => c.name === 'volume_json')) {
       db.exec("ALTER TABLE attempts ADD COLUMN volume_json TEXT");
     }
+    // Тема работы и состав базы данных нужны для шаблона отзыва руководителя
+    // (приложение 36 Программы практики ОП РиСО).
+    if (!cols.some(c => c.name === 'work_title')) {
+      db.exec("ALTER TABLE attempts ADD COLUMN work_title TEXT");
+    }
+    if (!cols.some(c => c.name === 'db_stats_json')) {
+      db.exec("ALTER TABLE attempts ADD COLUMN db_stats_json TEXT");
+    }
   } catch (e) {
     console.error('Migration programme columns error (non-critical):', e);
   }
@@ -182,6 +192,8 @@ function initSchema(db: Database.Database) {
         "programme TEXT NOT NULL DEFAULT 'ik'",
         "work_lang TEXT NOT NULL DEFAULT 'ru'",
         'volume_json TEXT',
+        'work_title TEXT',
+        'db_stats_json TEXT',
       ];
       // Оставляем только те определения, для которых колонка реально есть,
       // и переносим ровно их — так лишняя/неизвестная колонка не уронит INSERT.
@@ -233,6 +245,8 @@ export interface AttemptRow {
   programme: string;
   work_lang: string;
   volume_json: string | null;
+  work_title: string | null;
+  db_stats_json: string | null;
   created_at: string;
 }
 
@@ -269,13 +283,15 @@ export function insertAttempt(data: {
   programme?: string;
   work_lang?: string;
   volume_json?: string;
+  work_title?: string;
+  db_stats_json?: string;
 }): number {
   const db = getDb();
   const stmt = db.prepare(`
     INSERT INTO attempts (student_name, work_type, attempt_number, status, results_json,
       extracted_text_preview, file_name, db_link, pres_link, methods_json, uses_ai, wave, feedback, file_path,
-      programme, work_lang, volume_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      programme, work_lang, volume_json, work_title, db_stats_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
     data.student_name,
@@ -294,7 +310,9 @@ export function insertAttempt(data: {
     data.file_path || null,
     data.programme || 'ik',
     data.work_lang || 'ru',
-    data.volume_json || null
+    data.volume_json || null,
+    data.work_title || null,
+    data.db_stats_json || null
   );
   return result.lastInsertRowid as number;
 }

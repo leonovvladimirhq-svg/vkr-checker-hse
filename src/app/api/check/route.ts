@@ -24,6 +24,7 @@ export async function POST(req: NextRequest) {
 
     // --- Извлечение полей ---
     const studentName = (formData.get('studentName') as string)?.trim();
+    const workTitle = ((formData.get('workTitle') as string) || '').trim();
     const programmeId = (formData.get('programme') as string) || DEFAULT_PROGRAMME;
     const workType = formData.get('workType') as WorkType;
     const workLang = ((formData.get('workLang') as string) || 'ru') as WorkLang;
@@ -57,6 +58,15 @@ export async function POST(req: NextRequest) {
 
     if (workLang !== 'ru' && workLang !== 'en') {
       return NextResponse.json({ error: 'Неверный язык работы' }, { status: 400 });
+    }
+
+    // Тема нужна для шаблона отзыва руководителя (приложение 36) — без неё
+    // в документе останется пустая строка, поэтому спрашиваем сразу.
+    if (programme.requiresWorkTitle && workTitle.length < 5) {
+      return NextResponse.json(
+        { error: 'Укажите тему работы (не менее 5 символов)' },
+        { status: 400 }
+      );
     }
 
     const empMethods: ResearchMethod[] = JSON.parse(empMethodsRaw);
@@ -131,6 +141,7 @@ export async function POST(req: NextRequest) {
     // --- Ответ (без сохранения в БД — студент сохраняет явно) ---
     return NextResponse.json({
       studentName,
+      workTitle,
       programme: programme.id,
       programmeLabel: programme.label,
       workType,
@@ -166,6 +177,10 @@ export async function POST(req: NextRequest) {
         programme: programme.id,
         workLang,
         volumeJson: volume ? JSON.stringify(volume) : '',
+        workTitle,
+        // Снимок состава БД на момент проверки — фолбэк для шаблона отзыва,
+        // если к моменту его выгрузки ссылка на Яндекс.Диск перестанет открываться.
+        dbStatsJson: dbAnalysis?.stats ? JSON.stringify(dbAnalysis.stats) : '',
       },
     });
 

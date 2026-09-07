@@ -66,6 +66,8 @@ interface CheckResponse {
     programme: string;
     workLang: string;
     volumeJson: string;
+    workTitle: string;
+    dbStatsJson: string;
   };
   error?: string;
 }
@@ -80,6 +82,7 @@ export default function StudentPage() {
   // Форма
   const [programmeId, setProgrammeId] = useState<ProgrammeId>(DEFAULT_PROGRAMME);
   const [studentName, setStudentName] = useState('');
+  const [workTitle, setWorkTitle] = useState('');
   const [workType, setWorkType] = useState<WorkType | ''>('');
   const [workLang, setWorkLang] = useState<WorkLang>('ru');
   const [usesAI, setUsesAI] = useState(false);
@@ -149,10 +152,14 @@ export default function StudentPage() {
     setError('');
   };
 
+  // Тема работы нужна только там, где есть шаблон отзыва руководителя (ОП РиСО)
+  const needsWorkTitle = programme.requiresWorkTitle;
+
   // Валидация формы
   const nameWords = studentName.trim().split(/\s+/).filter(Boolean).length;
   const hasOtherMethod = empMethods.includes('other') || compMethods.includes('other_comp');
   const isFormValid = nameWords >= 2 && workType && file && dbLink.trim() &&
+    (!needsWorkTitle || workTitle.trim().length >= 5) &&
     (!needsPresentation || presLink.trim()) &&
     empMethods.length >= minMethods &&
     (!hasOtherMethod || otherMethodName.trim().length > 0);
@@ -197,6 +204,7 @@ export default function StudentPage() {
       const formData = new FormData();
       formData.append('studentName', studentName);
       formData.append('programme', programmeId);
+      formData.append('workTitle', workTitle.trim());
       formData.append('workType', workType);
       formData.append('workLang', workLang);
       formData.append('usesAI', String(usesAI));
@@ -255,6 +263,8 @@ export default function StudentPage() {
       formData.append('programme', result.saveData.programme);
       formData.append('workLang', result.saveData.workLang);
       formData.append('volumeJson', result.saveData.volumeJson);
+      formData.append('workTitle', result.saveData.workTitle);
+      formData.append('dbStatsJson', result.saveData.dbStatsJson);
       formData.append('status', result.status);
       formData.append('resultsJson', result.saveData.resultsJson);
       formData.append('extractedTextPreview', result.saveData.extractedTextPreview);
@@ -552,6 +562,18 @@ export default function StudentPage() {
               </select>
             </div>
           </div>
+
+          {needsWorkTitle && (
+            <div className="mb-4">
+              <label className="block text-sm font-semibold mb-1.5">Тема работы *</label>
+              <input type="text" value={workTitle} onChange={e => setWorkTitle(e.target.value)}
+                placeholder="Название темы ВКР как на титульном листе"
+                className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+              <p className="text-xs text-slate-400 mt-1">
+                Подставляется в шаблон отзыва руководителя — укажите формулировку темы точно как на титульном листе
+              </p>
+            </div>
+          )}
 
           {programme.hasLangChoice && (
             <div className="mb-4 max-w-xs">

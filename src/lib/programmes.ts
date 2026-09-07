@@ -54,6 +54,10 @@ export interface ProgrammeConfig {
   conceptMinChars: number | null;
   /** Минимальная продолжительность аудио/видеозаписей, минут. */
   mediaMinMinutes: number;
+  /** Спрашивать тему работы — она подставляется в шаблон отзыва руководителя. */
+  requiresWorkTitle: boolean;
+  /** Программа поддерживает выгрузку шаблона отзыва руководителя (.docx). */
+  hasReviewTemplate: boolean;
 }
 
 const IK_METHODS: Option<ResearchMethod>[] = [
@@ -104,6 +108,8 @@ export const PROGRAMMES: Record<ProgrammeId, ProgrammeConfig> = {
     volumeThresholds: null,
     conceptMinChars: null,
     mediaMinMinutes: IK_MEDIA_MIN_MINUTES,
+    requiresWorkTitle: false,
+    hasReviewTemplate: false,
   },
 
   riso: {
@@ -123,6 +129,8 @@ export const PROGRAMMES: Record<ProgrammeId, ProgrammeConfig> = {
     volumeThresholds: RISO_VOLUME_THRESHOLDS,
     conceptMinChars: RISO_CONCEPT_MIN_CHARS,
     mediaMinMinutes: RISO_MEDIA_MIN_MINUTES,
+    requiresWorkTitle: true,
+    hasReviewTemplate: true,
   },
 };
 

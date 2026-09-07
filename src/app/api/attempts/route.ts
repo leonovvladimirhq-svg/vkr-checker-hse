@@ -51,6 +51,8 @@ export async function POST(req: NextRequest) {
     const programme = (formData.get('programme') as string) || 'ik';
     const workLang = (formData.get('workLang') as string) || 'ru';
     const volumeJson = (formData.get('volumeJson') as string) || '';
+    const workTitle = ((formData.get('workTitle') as string) || '').trim();
+    const dbStatsJson = (formData.get('dbStatsJson') as string) || '';
     const file = formData.get('file') as File | null;
 
     if (!studentName || !workType || !status || !resultsJson) {
@@ -98,6 +100,8 @@ export async function POST(req: NextRequest) {
       programme: programme === 'riso' ? 'riso' : 'ik',
       work_lang: workLang === 'en' ? 'en' : 'ru',
       volume_json: volumeJson || undefined,
+      work_title: workTitle || undefined,
+      db_stats_json: dbStatsJson || undefined,
     });
 
     return NextResponse.json({ id: attemptId, attemptNumber, maxAttempts: 3 });

@@ -50,6 +50,8 @@ interface AttemptDetail {
   feedback: string | null;
   teacher_review: string | null;
   tech_comment: string | null;
+  programme?: string;
+  work_title?: string | null;
   created_at: string;
 }
 
@@ -1021,6 +1023,7 @@ export default function TeacherPage() {
 
 // ============ МОДАЛЬНОЕ ОКНО ДЕТАЛЕЙ ============
 function AttemptDetailModal({ attempt, onClose, onApprove, onReject }: { attempt: AttemptDetail; onClose: () => void; onApprove: (id: number, currentStatus?: string) => void; onReject: (id: number) => void }) {
+  const isRiso = (attempt.programme || programmeForWorkType(attempt.work_type)) === 'riso';
   const [reviewText, setReviewText] = useState(attempt.teacher_review || '');
   const [techText, setTechText] = useState(attempt.tech_comment || '');
   const [savingReview, setSavingReview] = useState(false);
@@ -1076,6 +1079,23 @@ function AttemptDetailModal({ attempt, onClose, onApprove, onReject }: { attempt
                 : <> &middot; <span className="text-amber-600 font-medium">Файл не сохранён</span></>
               }
             </p>
+            {attempt.work_title && (
+              <p className="text-sm text-slate-600 mt-1">Тема: «{attempt.work_title}»</p>
+            )}
+            {isRiso && (
+              <div className="mt-3">
+                <a href={`/api/riso-review?id=${attempt.id}`}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-violet-600 text-white hover:bg-violet-700 transition"
+                  onClick={e => e.stopPropagation()}>
+                  📄 Скачать шаблон отзыва
+                </a>
+                <p className="text-xs text-slate-500 mt-1.5 max-w-xl">
+                  Отзыв руководителя по приложению 36 Программы практики. Заполнены только счётные поля:
+                  ФИО, тема, состав базы данных по типам файлов, объём в знаках. Содержательные критерии
+                  и оценку выставляет руководитель.
+                </p>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-3">
             <div className={`px-5 py-2.5 rounded-lg text-base font-bold border-2 ${
