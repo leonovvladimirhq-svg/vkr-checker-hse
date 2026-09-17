@@ -15,10 +15,15 @@ import { getProgramme, isProgrammeId, isValidWorkType, DEFAULT_PROGRAMME } from 
 import { getPublicResourceInfo } from '@/lib/yandex-disk';
 import { analyzeDatabase, DbAnalysisResult } from '@/lib/db-analyzer';
 import { assessVolume, VolumeAssessment } from '@/lib/volume';
+import { track, userRef } from '@/lib/telemetry';
 
 export const maxDuration = 120; // Увеличенный таймаут для GPT-анализа
 
 export async function POST(req: NextRequest) {
+  // Для телеметрии в дашборд мониторинга: время и что проверяли (без ПДн)
+  const t0 = Date.now();
+  let telemetryRef: string | null = null;
+  let telemetryWhat = 'Проверка работы';
   try {
     const formData = await req.formData();
 
@@ -77,6 +82,19 @@ export async function POST(req: NextRequest) {
         { error: `Для этой работы нужно выбрать минимум ${programme.minMethods(workType)} метод(а) исследования` },
         { status: 400 }
       );
+    }
+
+    // Что проверяем — для дашборда: программа, тип работы, формат и размер файла,
+    // методы. Без ФИО, темы и имени файла (в нём часто фамилия).
+    telemetryRef = userRef(studentName);
+    {
+      const ext = (file.name.split('.').pop() || '').toLowerCase();
+      const sizeMb = (file.size / 1024 / 1024).toFixed(1);
+      const typeLabel = programme.workTypes.find(t => t.value === workType)?.label || workType;
+      const methods = [...empMethods, ...(compMethods.length ? compMethods.map(m => `${m} (конкуренты)`) : [])];
+      telemetryWhat = `${programme.label} · ${typeLabel} · .${ext}, ${sizeMb} МБ`
+        + (methods.length ? ` · методы: ${methods.join(', ')}` : '')
+        + (usesAI ? ' · с ИИ' : '');
     }
 
     // --- Парсинг документа через mammoth/pdf-parse ---
@@ -138,6 +156,19 @@ export async function POST(req: NextRequest) {
     const manualCount = results.filter(r => r.passed === null).length;
     const overallStatus = failedCount > 0 ? 'fail' : manualCount > 0 ? 'pending' : 'pass';
 
+    // --- Телеметрия в дашборд: итог проверки (какие пункты не пройдены — без ПДн) ---
+    {
+      const verdict = overallStatus === 'pass' ? 'Зачёт' : overallStatus === 'fail' ? 'Незачёт' : 'Ожидает ручной проверки';
+      const failedTitles = results.filter(r => r.passed === false).map(r => r.text).slice(0, 5);
+      track({
+        user_ref: telemetryRef,
+        request_text: telemetryWhat,
+        response_text: `${verdict} · пройдено ${passedCount}, не пройдено ${failedCount}, вручную ${manualCount} из ${results.length}`
+          + (failedTitles.length ? `\nНе пройдено: ${failedTitles.join('; ')}` : ''),
+        latency_ms: Date.now() - t0,
+      });
+    }
+
     // --- Ответ (без сохранения в БД — студент сохраняет явно) ---
     return NextResponse.json({
       studentName,
@@ -186,6 +217,13 @@ export async function POST(req: NextRequest) {
 
   } catch (error: any) {
     console.error('Check API error:', error);
+    track({
+      user_ref: telemetryRef,
+      request_text: telemetryWhat,
+      response_text: `Ошибка: ${error?.message || 'внутренняя ошибка'}`.slice(0, 500),
+      status: 'error',
+      latency_ms: Date.now() - t0,
+    });
     return NextResponse.json(
       { error: error.message || 'Внутренняя ошибка сервера' },
       { status: 500 }

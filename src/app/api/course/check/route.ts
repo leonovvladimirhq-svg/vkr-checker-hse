@@ -8,6 +8,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { parseDocument } from '@/lib/parser';
 import { analyzeCourseWork, CourseAnalysisResult } from '@/lib/course-analyzer';
+import { track, userRef } from '@/lib/telemetry';
 import type { CourseType } from '@/lib/methodology';
 import {
   getCourseAttemptCount,
@@ -23,6 +24,10 @@ const TEACHER_PASSWORD = 'proverkahse';
 const UPLOAD_DIR = path.join(process.cwd(), 'data', 'course-uploads');
 
 export async function POST(req: NextRequest) {
+  // Для телеметрии в дашборд мониторинга: время и что проверяли (без ПДн)
+  const t0 = Date.now();
+  let telemetryRef: string | null = null;
+  let telemetryWhat = 'Проверка курсовой';
   try {
     const formData = await req.formData();
 
@@ -97,6 +102,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Что проверяем — для дашборда (без ФИО, темы и имени файла)
+    telemetryRef = userRef(studentName);
+    telemetryWhat = `Курсовая · ${courseType} · .${(file.name.split('.').pop() || '').toLowerCase()}, `
+      + `${(file.size / 1024 / 1024).toFixed(1)} МБ · режим: ${isTeacherMode ? 'преподаватель' : 'студент'}`;
+
     // --- Парсинг документа ---
     const fileBuffer = Buffer.from(await file.arrayBuffer());
     const doc = await parseDocument(fileBuffer, file.name);
@@ -147,6 +157,17 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // --- Телеметрия в дашборд: итог анализа ---
+    track({
+      user_ref: telemetryRef,
+      request_text: telemetryWhat,
+      response_text: `Попытка №${attemptNumber} · нет разделов: ${analysis.structuralAnalysis.missingSections.length}, `
+        + `замечаний по логике: ${analysis.logicAndCoherence.issues.length}, по тексту: ${analysis.textQuality.issues.length}, `
+        + `рекомендаций: ${analysis.recommendations.length}
+${(analysis.overallSummary || '').slice(0, 300)}`,
+      latency_ms: Date.now() - t0,
+    });
+
     return NextResponse.json({
       attemptId,
       attemptNumber,
@@ -167,6 +188,13 @@ export async function POST(req: NextRequest) {
     });
   } catch (error: any) {
     console.error('Course check API error:', error);
+    track({
+      user_ref: telemetryRef,
+      request_text: telemetryWhat,
+      response_text: `Ошибка: ${error?.message || 'внутренняя ошибка'}`.slice(0, 500),
+      status: 'error',
+      latency_ms: Date.now() - t0,
+    });
     return NextResponse.json(
       { error: error?.message || 'Внутренняя ошибка сервера при анализе курсовой' },
       { status: 500 }
