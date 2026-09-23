@@ -1,33 +1,49 @@
 // ============================================================
-// GET/DELETE /api/attempts — Просмотр и удаление проверок
+// /api/attempts — попытки проверки
+//   POST   — студент сохраняет результат (без входа: у студентов нет учётных записей)
+//   GET    — преподаватель: попытка по id или все попытки студента
+//   PATCH  — преподаватель: статус, отзыв, технический комментарий
+//   DELETE — преподаватель: удаление попытки
+//
+// GET/PATCH/DELETE требуют входа и работают только с попытками из области
+// видимости преподавателя (см. teacher-auth.ts). Чужая попытка неотличима
+// от несуществующей — 404.
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getAttemptById, getAttemptsByStudent, deleteAttempt, getAttemptCount, insertAttempt, updateAttemptStatus, updateAttemptFields } from '@/lib/db';
+import { getAttemptById, getAttemptsByStudent, deleteAttempt, getAttemptCount, insertAttempt, updateAttemptFields, attemptInScope, getTeacherAccountById } from '@/lib/db';
+import { requireTeacher, scopeOf, notFound } from '@/lib/teacher-auth';
 import path from 'path';
 import fs from 'fs';
 
 const UPLOADS_DIR = path.join(process.cwd(), 'data', 'uploads');
 
 export async function GET(req: NextRequest) {
+  const { teacher, denied } = requireTeacher(req);
+  if (denied) return denied;
+  const scope = scopeOf(teacher);
+
   const { searchParams } = req.nextUrl;
   const id = searchParams.get('id');
   const student = searchParams.get('student');
 
   if (id) {
     const attempt = getAttemptById(Number(id));
-    if (!attempt) {
-      return NextResponse.json({ error: 'Попытка не найдена' }, { status: 404 });
-    }
+    if (!attempt || !attemptInScope(attempt, scope)) return notFound();
+    const supervisor = attempt.supervisor_id ? getTeacherAccountById(attempt.supervisor_id) : undefined;
+    // Путь к файлу на сервере наружу не отдаём: он нужен только /api/download.
+    const { file_path, ...safe } = attempt;
     return NextResponse.json({
-      ...attempt,
+      ...safe,
+      has_file: !!file_path,
+      supervisor_name: supervisor?.full_name || null,
       results: JSON.parse(attempt.results_json),
       methods: attempt.methods_json ? JSON.parse(attempt.methods_json) : null,
     });
   }
 
   if (student) {
-    const attempts = getAttemptsByStudent(student);
+    const attempts = getAttemptsByStudent(student, scope).map(({ file_path, ...a }) => ({ ...a, has_file: !!file_path }));
     return NextResponse.json({ attempts });
   }
 
@@ -53,10 +69,23 @@ export async function POST(req: NextRequest) {
     const volumeJson = (formData.get('volumeJson') as string) || '';
     const workTitle = ((formData.get('workTitle') as string) || '').trim();
     const dbStatsJson = (formData.get('dbStatsJson') as string) || '';
+    const supervisorId = ((formData.get('supervisorId') as string) || '').trim();
     const file = formData.get('file') as File | null;
 
     if (!studentName || !workType || !status || !resultsJson) {
       return NextResponse.json({ error: 'Не указаны обязательные поля' }, { status: 400 });
+    }
+
+    // ОП РиСО: работа уходит конкретному научному руководителю и видна только
+    // ему. Без руководителя её не увидит никто, поэтому сохранять такую нельзя.
+    const programmeId = programme === 'riso' ? 'riso' : 'ik';
+    let supervisor: string | undefined;
+    if (programmeId === 'riso') {
+      const account = supervisorId ? getTeacherAccountById(supervisorId) : undefined;
+      if (!account || !account.active || account.programme !== 'riso' || account.role === 'shared') {
+        return NextResponse.json({ error: 'Выберите своего научного руководителя' }, { status: 400 });
+      }
+      supervisor = account.id;
     }
 
     // Проверка лимита попыток
@@ -97,7 +126,8 @@ export async function POST(req: NextRequest) {
       uses_ai: usesAI,
       feedback: feedback,
       file_path: filePath,
-      programme: programme === 'riso' ? 'riso' : 'ik',
+      programme: programmeId,
+      supervisor_id: supervisor,
       work_lang: workLang === 'en' ? 'en' : 'ru',
       volume_json: volumeJson || undefined,
       work_title: workTitle || undefined,
@@ -112,6 +142,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
+  const { teacher, denied } = requireTeacher(req);
+  if (denied) return denied;
+
   try {
     const id = req.nextUrl.searchParams.get('id');
     const body = await req.json();
@@ -130,6 +163,9 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Недопустимый статус' }, { status: 400 });
     }
 
+    const existing = getAttemptById(Number(id));
+    if (!existing || !attemptInScope(existing, scopeOf(teacher))) return notFound();
+
     const fields: { status?: string; teacher_review?: string; tech_comment?: string } = {};
     if (status !== undefined) fields.status = status;
     if (teacher_review !== undefined) fields.teacher_review = teacher_review;
@@ -147,6 +183,9 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const { teacher, denied } = requireTeacher(req);
+  if (denied) return denied;
+
   const { searchParams } = req.nextUrl;
   const id = searchParams.get('id');
 
@@ -156,7 +195,8 @@ export async function DELETE(req: NextRequest) {
 
   // Удалить файл с диска перед удалением записи
   const attempt = getAttemptById(Number(id));
-  if (attempt?.file_path && fs.existsSync(attempt.file_path)) {
+  if (!attempt || !attemptInScope(attempt, scopeOf(teacher))) return notFound();
+  if (attempt.file_path && fs.existsSync(attempt.file_path)) {
     try { fs.unlinkSync(attempt.file_path); } catch {}
   }
 

@@ -328,7 +328,7 @@ export default function CoursePage() {
       const res = await fetch('/api/course/reanalyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: result.attemptId }),
+        body: JSON.stringify({ id: result.attemptId, teacherPassword: getCourseTeacherPassword() || '' }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));

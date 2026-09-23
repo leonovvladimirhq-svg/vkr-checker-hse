@@ -6,6 +6,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
+import { requireIkShared } from '@/lib/teacher-auth';
 import {
   getSetting,
   setSetting,
@@ -81,20 +82,22 @@ export async function GET(req: NextRequest) {
   }
 }
 
-const REPORT_PASSWORD = '1234';
-
+// Публикация и закрытие отчёта — только общий доступ ОП ИК. Раньше здесь
+// сверялся пароль «1234», который лежал в JS-коде панели преподавателя и
+// в публичном репозитории, то есть не защищал ничего.
 export async function POST(req: NextRequest) {
+  const { denied } = requireIkShared(req);
+  if (denied) return denied;
+
   try {
-    const body = await req.json().catch(() => ({}));
-    if (body.password !== REPORT_PASSWORD) {
-      return NextResponse.json({ error: 'Неверный пароль' }, { status: 401 });
-    }
 
     const generatedAt = new Date().toISOString();
     setSetting('report_generated_at', generatedAt);
 
     // Снапшот: сохранить IDs последних попыток всех студентов на момент публикации
-    const summary = getAllStudentsSummary();
+    // Снапшот охватывает все работы, как и прежде: отчёт публикуется для
+    // всех студентов сразу, а видит каждый только свою запись по ФИО.
+    const summary = getAllStudentsSummary(null);
     const snapshotIds = summary.map((s) => s.id);
     setSetting('report_snapshot_ids', JSON.stringify(snapshotIds));
 
@@ -106,11 +109,10 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const { denied } = requireIkShared(req);
+  if (denied) return denied;
+
   try {
-    const body = await req.json().catch(() => ({}));
-    if (body.password !== REPORT_PASSWORD) {
-      return NextResponse.json({ error: 'Неверный пароль' }, { status: 401 });
-    }
     setSetting('report_generated_at', '');
     setSetting('report_snapshot_ids', '[]');
     return NextResponse.json({ ok: true });

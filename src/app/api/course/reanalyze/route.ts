@@ -7,6 +7,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import { getCourseAttemptById, setCourseCheckerGrade } from '@/lib/db-course';
+import { getTeacher } from '@/lib/teacher-auth';
+import { COURSE_TEACHER_PASSWORD } from '@/lib/course-teacher';
 import { parseDocument } from '@/lib/parser';
 import { generateReviewFields } from '@/lib/course-review-prompt';
 import { generateReviewDocx } from '@/lib/course-review-doc';
@@ -17,6 +19,16 @@ export const maxDuration = 300;
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
+
+    // Два законных пути: панель преподавателя (сессия общего доступа ОП ИК)
+    // и режим «Я преподаватель» на /course (пароль этого режима в теле).
+    const teacher = getTeacher(req);
+    const viaPanel = teacher?.role === 'shared';
+    const viaCoursePage = body.teacherPassword === COURSE_TEACHER_PASSWORD;
+    if (!viaPanel && !viaCoursePage) {
+      return NextResponse.json({ error: 'Требуется вход преподавателя', code: 'auth_required' }, { status: 401 });
+    }
+
     const id = Number(body.id);
     if (!id || isNaN(id)) {
       return NextResponse.json({ error: 'Не указан id попытки' }, { status: 400 });

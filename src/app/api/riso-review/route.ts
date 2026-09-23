@@ -9,7 +9,9 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getAttemptById } from '@/lib/db';
+import { getAttemptById, attemptInScope, getTeacherAccountById } from '@/lib/db';
+import { requireTeacher, scopeOf, notFound } from '@/lib/teacher-auth';
+import { initialsSurname } from '@/lib/teachers';
 import { buildRisoReviewDoc, RisoReviewData, RisoReviewMediaFile } from '@/lib/riso-review-doc';
 import { analyzeDbWithFallback, DbStats } from '@/lib/db-analyzer';
 import { PROGRAMMES } from '@/lib/programmes';
@@ -30,6 +32,11 @@ const MEDIA_THRESHOLDS: Record<string, number> = {
 };
 
 export async function GET(req: NextRequest) {
+  // Отзыв содержит ФИО, тему и состав базы данных студента — только для
+  // преподавателя, в чью область видимости входит работа.
+  const { teacher, denied } = requireTeacher(req);
+  if (denied) return denied;
+
   try {
     const idParam = req.nextUrl.searchParams.get('id');
     if (!idParam) {
@@ -37,9 +44,11 @@ export async function GET(req: NextRequest) {
     }
 
     const attempt = getAttemptById(Number(idParam));
-    if (!attempt) {
-      return NextResponse.json({ error: 'Попытка не найдена' }, { status: 404 });
-    }
+    if (!attempt || !attemptInScope(attempt, scopeOf(teacher))) return notFound();
+
+    // В подпись отзыва ставим «И. О. Фамилия» руководителя, которого выбрал
+    // студент, — это такое же точное поле, как ФИО студента.
+    const supervisor = attempt.supervisor_id ? getTeacherAccountById(attempt.supervisor_id) : undefined;
 
     const programmeId = attempt.programme || programmeForWorkType(attempt.work_type);
     if (programmeId !== 'riso') {
@@ -132,6 +141,7 @@ export async function GET(req: NextRequest) {
       volumeMet: typeof volume?.passed === 'boolean' ? volume.passed : null,
 
       usesAI: attempt.uses_ai === 1,
+      supervisorInitials: supervisor ? initialsSurname(supervisor.full_name) : null,
     };
 
     const buffer = await buildRisoReviewDoc(data);

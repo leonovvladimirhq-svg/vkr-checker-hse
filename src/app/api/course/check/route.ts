@@ -4,6 +4,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
+import { COURSE_TEACHER_PASSWORD } from '@/lib/course-teacher';
 import fs from 'fs/promises';
 import path from 'path';
 import { parseDocument } from '@/lib/parser';
@@ -20,7 +21,7 @@ import { analyzeDbWithFallback, DbAnalysisResult } from '@/lib/db-analyzer';
 export const maxDuration = 120;
 
 // Пароль упрощённого преподавательского флоу «Я преподаватель» (см. встречу 11.06.2026).
-const TEACHER_PASSWORD = 'proverkahse';
+const TEACHER_PASSWORD = COURSE_TEACHER_PASSWORD;
 const UPLOAD_DIR = path.join(process.cwd(), 'data', 'course-uploads');
 
 export async function POST(req: NextRequest) {

@@ -80,6 +80,9 @@ export interface RisoReviewData {
   volumeExcludedNote: string | null;
 
   usesAI: boolean;
+
+  /** «С. А. Зверев» — научный руководитель, выбранный студентом. null — не указан. */
+  supervisorInitials: string | null;
 }
 
 // ---------- Утилиты ----------
@@ -477,7 +480,9 @@ export async function buildRisoReviewDoc(d: RisoReviewData): Promise<Buffer> {
   children.push(
     p('Руководитель', { size: 24, spaceAfter: 0 }),
     p('ученая степень, звание, кафедра/департамент, (место работы)', { size: 18, color: GREY_HEX, spaceAfter: 200 }),
-    p('_________________________                                        __________________', { size: 24, spaceAfter: 0 }),
+    p(d.supervisorInitials
+      ? `_________________________                                        ${d.supervisorInitials}`
+      : '_________________________                                        __________________', { size: 24, spaceAfter: 0 }),
     p('              (подпись)                                                                      (И.О. Фамилия)', { size: 18, color: GREY_HEX, spaceAfter: 140 }),
     p('Дата_______________', { size: 24, spaceAfter: 260 }),
   );
@@ -486,6 +491,7 @@ export async function buildRisoReviewDoc(d: RisoReviewData): Promise<Buffer> {
   const filled: string[] = ['ФИО студента и тема работы'];
   if (d.dbAccessible) filled.push('число файлов базы данных по типам');
   if (d.charsWithSpaces !== null) filled.push('объём работы в знаках с пробелами и вердикт по порогу');
+  if (d.supervisorInitials) filled.push('И. О. Фамилия руководителя (по выбору студента)');
 
   children.push(
     p('— — — служебная информация, удалите перед подписанием — — —',

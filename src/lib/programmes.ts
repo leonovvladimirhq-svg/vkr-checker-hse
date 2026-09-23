@@ -53,6 +53,11 @@ export interface ProgrammeConfig {
   mediaMinMinutes: number;
   /** Спрашивать тему работы — она подставляется в шаблон отзыва руководителя. */
   requiresWorkTitle: boolean;
+  /**
+   * Студент выбирает научного руководителя, и работа видна только ему.
+   * Для ОП ИК — нет: там общий доступ, как было до 09.2026.
+   */
+  requiresSupervisor: boolean;
   /** Программа поддерживает выгрузку шаблона отзыва руководителя (.docx). */
   hasReviewTemplate: boolean;
 }
@@ -105,6 +110,7 @@ export const PROGRAMMES: Record<ProgrammeId, ProgrammeConfig> = {
     volumeThresholds: null,
     mediaMinMinutes: IK_MEDIA_MIN_MINUTES,
     requiresWorkTitle: false,
+    requiresSupervisor: false,
     hasReviewTemplate: false,
   },
 
@@ -125,6 +131,7 @@ export const PROGRAMMES: Record<ProgrammeId, ProgrammeConfig> = {
     volumeThresholds: RISO_VOLUME_THRESHOLDS,
     mediaMinMinutes: RISO_MEDIA_MIN_MINUTES,
     requiresWorkTitle: true,
+    requiresSupervisor: true,
     hasReviewTemplate: true,
   },
 };

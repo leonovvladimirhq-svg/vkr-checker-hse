@@ -93,6 +93,9 @@ export default function StudentPage() {
   const [compMethods, setCompMethods] = useState<string[]>([]);
   const [otherMethodName, setOtherMethodName] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  // Научный руководитель (ОП РиСО): работа уходит ему и видна только ему
+  const [supervisorId, setSupervisorId] = useState('');
+  const [supervisors, setSupervisors] = useState<Array<{ id: string; fullName: string; programme: string }>>([]);
 
   // Состояние
   const [loading, setLoading] = useState(false);
@@ -150,8 +153,23 @@ export default function StudentPage() {
     setOtherMethodName('');
     setPresLink('');
     setWorkLang('ru');
+    setSupervisorId('');
     setError('');
   };
+
+  // Список научных руководителей — с сервера, чтобы добавить преподавателя
+  // можно было без правки кода страницы.
+  useEffect(() => {
+    if (!authenticated) return;
+    fetch('/api/teachers')
+      .then(r => r.json())
+      .then(j => setSupervisors((j.accounts || []).filter((a: any) => a.role !== 'shared')))
+      .catch(() => setSupervisors([]));
+  }, [authenticated]);
+
+  const needsSupervisor = programme.requiresSupervisor;
+  const programmeSupervisors = supervisors.filter(s => s.programme === programmeId);
+  const supervisorName = programmeSupervisors.find(s => s.id === supervisorId)?.fullName || '';
 
   // Тема работы нужна только там, где есть шаблон отзыва руководителя (ОП РиСО)
   const needsWorkTitle = programme.requiresWorkTitle;
@@ -161,6 +179,7 @@ export default function StudentPage() {
   const hasOtherMethod = empMethods.includes('other') || compMethods.includes('other_comp');
   const isFormValid = nameWords >= 2 && workType && file && dbLink.trim() &&
     (!needsWorkTitle || workTitle.trim().length >= 5) &&
+    (!needsSupervisor || !!supervisorName) &&
     (!needsPresentation || presLink.trim()) &&
     empMethods.length >= minMethods &&
     (!hasOtherMethod || otherMethodName.trim().length > 0);
@@ -266,6 +285,7 @@ export default function StudentPage() {
       formData.append('volumeJson', result.saveData.volumeJson);
       formData.append('workTitle', result.saveData.workTitle);
       formData.append('dbStatsJson', result.saveData.dbStatsJson);
+      if (needsSupervisor) formData.append('supervisorId', supervisorId);
       formData.append('status', result.status);
       formData.append('resultsJson', result.saveData.resultsJson);
       formData.append('extractedTextPreview', result.saveData.extractedTextPreview);
@@ -459,6 +479,14 @@ export default function StudentPage() {
               </div>
             )}
 
+            {needsSupervisor && supervisorName && (
+              <p className="text-sm text-slate-600 mt-4 text-right print:hidden">
+                {saved ? 'Работа отправлена' : 'Работа будет отправлена'} научному руководителю:{' '}
+                <span className="font-semibold text-slate-800">{supervisorName}</span>.
+                {!saved && ' Другие преподаватели её не увидят.'}
+              </p>
+            )}
+
             {/* Кнопки */}
             <div className="flex gap-3 justify-end mt-6 print:hidden">
               <button onClick={handleSave} disabled={savingResult || saved}
@@ -563,6 +591,22 @@ export default function StudentPage() {
               </select>
             </div>
           </div>
+
+          {needsSupervisor && (
+            <div className="mb-4">
+              <label className="block text-sm font-semibold mb-1.5">Ваш научный руководитель *</label>
+              <select value={supervisorId} onChange={e => setSupervisorId(e.target.value)}
+                className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 bg-white">
+                <option value="">— Выберите своего преподавателя —</option>
+                {programmeSupervisors.map(s => (
+                  <option key={s.id} value={s.id}>{s.fullName}</option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-400 mt-1">
+                Сохранённая работа попадёт только к выбранному руководителю — другие преподаватели её не увидят
+              </p>
+            </div>
+          )}
 
           {needsWorkTitle && (
             <div className="mb-4">

@@ -4,9 +4,14 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getTodayAttempts, getSetting } from '@/lib/db';
+import { requireIkShared, scopeOf } from '@/lib/teacher-auth';
 import nodemailer from 'nodemailer';
 
 export async function POST(req: NextRequest) {
+  // Дайджест — процесс ОП ИК: письмо уходит на адрес из настроек ОП ИК.
+  const { teacher, denied } = requireIkShared(req);
+  if (denied) return denied;
+
   try {
     const digestEmail = getSetting('digest_email');
     if (!digestEmail) {
@@ -16,7 +21,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const attempts = getTodayAttempts();
+    const attempts = getTodayAttempts(scopeOf(teacher));
     if (attempts.length === 0) {
       return NextResponse.json({ message: 'Нет загрузок за сегодня — дайджест не отправлен' });
     }

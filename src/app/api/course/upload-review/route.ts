@@ -8,12 +8,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
 import { getCourseAttemptById, setCourseTeacherReview } from '@/lib/db-course';
+import { requireIkShared } from '@/lib/teacher-auth';
 
 export const maxDuration = 60;
 
 const REVIEW_DIR = path.join(process.cwd(), 'data', 'course-reviews');
 
 export async function POST(req: NextRequest) {
+  const { denied } = requireIkShared(req);
+  if (denied) return denied;
+
   try {
     const formData = await req.formData();
     const attemptId = Number(formData.get('attemptId'));

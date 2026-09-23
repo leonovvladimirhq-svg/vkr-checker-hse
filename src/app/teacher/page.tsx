@@ -2,8 +2,36 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { saveAuth, readAuth, clearAuth } from '@/lib/authCache';
+import { clearAuth } from '@/lib/authCache';
 import { PROGRAMMES, programmeForWorkType, workTypeLabel, workTypeShortLabel } from '@/lib/programmes';
+
+// Вход проверяется на сервере (сессионная кука vkr_teacher, см.
+// src/lib/teacher-auth.ts). Страница знает только, кто вошёл, — пароля и
+// правил доступа в её коде нет.
+interface TeacherInfo {
+  id: string;
+  fullName: string;
+  programme: string;
+  role: 'supervisor' | 'programme_lead' | 'shared';
+}
+
+interface LoginAccount {
+  id: string;
+  login: string;
+  fullName: string;
+  programme: string;
+  role: TeacherInfo['role'];
+  canLogin: boolean;
+}
+
+// Любой ответ 401 от API панели значит, что сессия истекла или учётную
+// запись отключили: панель возвращается на экран входа.
+let onUnauthorized: (() => void) | null = null;
+async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  const res = await fetch(input, init);
+  if (res.status === 401 && onUnauthorized) onUnauthorized();
+  return res;
+}
 
 interface StudentSummary {
   id: number;
@@ -15,6 +43,7 @@ interface StudentSummary {
   wave: number;
   /** 'ik' | 'riso'. У записей, созданных до появления РиСО, приходит 'ik'. */
   programme?: string;
+  supervisor_name?: string | null;
 }
 
 interface AttemptRow {
@@ -46,7 +75,9 @@ interface AttemptDetail {
   db_link: string | null;
   pres_link: string | null;
   uses_ai: number;
-  file_path: string | null;
+  /** Файл работы есть на сервере. Сам путь наружу не отдаётся. */
+  has_file: boolean;
+  supervisor_name?: string | null;
   feedback: string | null;
   teacher_review: string | null;
   tech_comment: string | null;
@@ -57,8 +88,10 @@ interface AttemptDetail {
 
 interface StudentsData {
   students: StudentSummary[];
-  stats: { total: number; passed: number; failed: number; pendingReview: number; notSubmitted: number };
-  settings: { digestEmail: string; currentWave: string };
+  /** notSubmitted = null: состава потока в сервисе нет (ОП РиСО), карточка скрыта. */
+  stats: { total: number; passed: number; failed: number; pendingReview: number; notSubmitted: number | null };
+  /** null — настройки дайджеста не относятся к этой учётной записи (не ОП ИК). */
+  settings: { digestEmail: string; currentWave: string } | null;
 }
 
 // ===== Курсовые работы =====
@@ -97,11 +130,18 @@ const READINESS_COLORS: Record<string, string> = {
 };
 
 export default function TeacherPage() {
-  // Авторизация
-  const [authenticated, setAuthenticated] = useState(false);
-  const [loginInput, setLoginInput] = useState('');
+  // Вход
+  const [teacher, setTeacher] = useState<TeacherInfo | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [accounts, setAccounts] = useState<LoginAccount[]>([]);
+  const [loginAccount, setLoginAccount] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [loggingIn, setLoggingIn] = useState(false);
+  const authenticated = !!teacher;
+  // Общий доступ ОП ИК видит всё, как раньше; преподаватель ОП РиСО —
+  // только своих студентов, без курсовых, дайджеста и публикации отчёта.
+  const isIk = teacher?.role === 'shared';
 
   const [data, setData] = useState<StudentsData | null>(null);
   const [todayAttempts, setTodayAttempts] = useState<AttemptRow[]>([]);
@@ -132,42 +172,77 @@ export default function TeacherPage() {
   // Подтверждение удаления
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
 
-  // Восстановление авторизации из localStorage при первом рендере (TTL 24 часа)
+  // Кто вошёл — спрашиваем у сервера; список учётных записей — для экрана входа.
   useEffect(() => {
-    if (readAuth('teacher')) {
-      setAuthenticated(true);
-    }
+    // Прежний флаг входа в localStorage больше ничего не открывает — убираем.
+    clearAuth('teacher');
+    fetch('/api/teacher/me')
+      .then(r => (r.ok ? r.json() : null))
+      .then(t => setTeacher(t))
+      .catch(() => setTeacher(null))
+      .finally(() => setAuthChecked(true));
+    fetch('/api/teachers')
+      .then(r => r.json())
+      .then(j => setAccounts((j.accounts || []).filter((a: LoginAccount) => a.canLogin)))
+      .catch(() => setAccounts([]));
   }, []);
 
-  const handleLogin = () => {
-    if (loginInput === 'admin 1029' && passwordInput === 'hsevkrch12') {
-      setAuthenticated(true);
-      setLoginError('');
-      saveAuth('teacher');
-    } else {
-      setLoginError('Неверный логин или пароль');
+  useEffect(() => {
+    onUnauthorized = () => {
+      setTeacher(null);
+      setLoginError('Сессия истекла — войдите снова');
+    };
+    return () => { onUnauthorized = null; };
+  }, []);
+
+  const handleLogin = async () => {
+    if (!loginAccount || !passwordInput) {
+      setLoginError('Выберите учётную запись и введите пароль');
+      return;
+    }
+    setLoggingIn(true);
+    setLoginError('');
+    try {
+      const res = await fetch('/api/teacher/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ login: loginAccount, password: passwordInput }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLoginError(json.error || 'Не удалось войти');
+        return;
+      }
+      setTeacher(json as TeacherInfo);
+      setPasswordInput('');
+    } catch {
+      setLoginError('Сервер недоступен — попробуйте ещё раз');
+    } finally {
+      setLoggingIn(false);
     }
   };
 
-  const handleLogout = () => {
-    clearAuth('teacher');
-    setAuthenticated(false);
-    setLoginInput('');
+  const handleLogout = async () => {
+    await fetch('/api/teacher/logout', { method: 'POST' }).catch(() => {});
+    setTeacher(null);
     setPasswordInput('');
     setData(null);
     setTodayAttempts([]);
+    setCourseList([]);
+    setExpandedStudent(null);
+    setSelectedAttempt(null);
   };
 
   useEffect(() => {
-    if (!authenticated) return;
+    if (!teacher) return;
     fetchData();
     fetchToday();
-    fetchCourseList();
-  }, [authenticated]);
+    if (teacher.role === 'shared') fetchCourseList();
+  }, [teacher]);
 
   const fetchCourseList = async () => {
     try {
-      const res = await fetch('/api/course/teacher');
+      const res = await apiFetch('/api/course/teacher');
       const json = await res.json();
       setCourseList(json.items || []);
     } catch (err) {
@@ -177,7 +252,7 @@ export default function TeacherPage() {
 
   const openCourseDetail = async (id: number) => {
     try {
-      const res = await fetch(`/api/course/teacher?id=${id}`);
+      const res = await apiFetch(`/api/course/teacher?id=${id}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Не удалось загрузить детали');
       setCourseDetail(json as CourseDetail);
@@ -195,7 +270,7 @@ export default function TeacherPage() {
     setReanalyzingId(id);
     setCourseMsg('');
     try {
-      const res = await fetch('/api/course/reanalyze', {
+      const res = await apiFetch('/api/course/reanalyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
@@ -233,7 +308,7 @@ export default function TeacherPage() {
       const fd = new FormData();
       fd.append('attemptId', String(id));
       fd.append('file', file);
-      const res = await fetch('/api/course/upload-review', { method: 'POST', body: fd });
+      const res = await apiFetch('/api/course/upload-review', { method: 'POST', body: fd });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || `Ошибка ${res.status}`);
       setCourseMsg('✓ Итоговый отзыв загружен.');
@@ -256,7 +331,7 @@ export default function TeacherPage() {
     setDeletingCourseId(c.id);
     setCourseMsg('');
     try {
-      const res = await fetch(`/api/course/teacher?id=${c.id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/course/teacher?id=${c.id}`, { method: 'DELETE' });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || `Ошибка ${res.status}`);
       setCourseMsg('✓ Работа удалена.');
@@ -270,8 +345,9 @@ export default function TeacherPage() {
 
   const fetchData = async () => {
     try {
-      const res = await fetch('/api/students');
+      const res = await apiFetch('/api/students');
       const json = await res.json();
+      if (!res.ok) return;
       setData(json);
       setDigestEmail(json.settings?.digestEmail || '');
       setCurrentWave(json.settings?.currentWave || '1');
@@ -282,7 +358,7 @@ export default function TeacherPage() {
 
   const fetchToday = async () => {
     try {
-      const res = await fetch('/api/students?today=1');
+      const res = await apiFetch('/api/students?today=1');
       const json = await res.json();
       setTodayAttempts(json.attempts || []);
     } catch (err) {
@@ -293,7 +369,7 @@ export default function TeacherPage() {
   const saveSettings = async () => {
     setSaving(true);
     try {
-      await fetch('/api/students', {
+      await apiFetch('/api/students', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ digestEmail, currentWave }),
@@ -309,7 +385,7 @@ export default function TeacherPage() {
   const sendDigest = async () => {
     setSendingDigest(true);
     try {
-      const res = await fetch('/api/digest', { method: 'POST' });
+      const res = await apiFetch('/api/digest', { method: 'POST' });
       const json = await res.json();
       setMessage(json.message || 'Дайджест отправлен');
       setTimeout(() => setMessage(''), 5000);
@@ -329,7 +405,7 @@ export default function TeacherPage() {
     setExpandedStudent(studentName);
     setLoadingAttempts(true);
     try {
-      const res = await fetch(`/api/attempts?student=${encodeURIComponent(studentName)}`);
+      const res = await apiFetch(`/api/attempts?student=${encodeURIComponent(studentName)}`);
       const json = await res.json();
       setStudentAttempts(json.attempts || []);
     } catch {
@@ -342,7 +418,7 @@ export default function TeacherPage() {
   const openDetail = async (attemptId: number) => {
     setLoadingDetail(true);
     try {
-      const res = await fetch(`/api/attempts?id=${attemptId}`);
+      const res = await apiFetch(`/api/attempts?id=${attemptId}`);
       const json = await res.json();
       setSelectedAttempt(json);
     } catch {
@@ -354,7 +430,7 @@ export default function TeacherPage() {
   // Удалить попытку
   const handleDelete = async (attemptId: number) => {
     try {
-      const res = await fetch(`/api/attempts?id=${attemptId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/attempts?id=${attemptId}`, { method: 'DELETE' });
       if (res.ok) {
         setDeleteConfirm(null);
         setMessage('Проверка удалена');
@@ -385,7 +461,7 @@ export default function TeacherPage() {
       if (!ok) return;
     }
     try {
-      const res = await fetch(`/api/attempts?id=${attemptId}`, {
+      const res = await apiFetch(`/api/attempts?id=${attemptId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'pass' }),
@@ -417,7 +493,7 @@ export default function TeacherPage() {
     );
     if (!ok) return;
     try {
-      const res = await fetch(`/api/attempts?id=${attemptId}`, {
+      const res = await apiFetch(`/api/attempts?id=${attemptId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'fail' }),
@@ -447,34 +523,55 @@ export default function TeacherPage() {
       'ФИО': s.student_name,
       'Программа': PROGRAMMES[(s.programme === 'riso' ? 'riso' : programmeForWorkType(s.work_type))].label,
       'Тип работы': workTypeShortLabel(s.work_type),
+      'Научный руководитель': s.supervisor_name || '',
       'Статус': s.status === 'pass' ? 'Зачёт' : s.status === 'pending' ? 'Ожидает проверки' : 'Незачёт',
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols'] = [{ wch: 35 }, { wch: 34 }, { wch: 20 }, { wch: 20 }];
+    ws['!cols'] = [{ wch: 35 }, { wch: 34 }, { wch: 20 }, { wch: 32 }, { wch: 20 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Студенты');
     XLSX.writeFile(wb, 'студенты_вкр.xlsx');
   };
 
-  const stats = data?.stats || { total: 57, passed: 0, failed: 0, pendingReview: 0, notSubmitted: 57 };
+  const stats = data?.stats || { total: 0, passed: 0, failed: 0, pendingReview: 0, notSubmitted: null };
+
+  // Пока не выяснили, есть ли сессия, — ничего не показываем (без мигания формы входа)
+  if (!authChecked) {
+    return <div className="min-h-screen bg-slate-50" />;
+  }
 
   // Форма входа
   if (!authenticated) {
+    const ikAccounts = accounts.filter(a => a.programme === 'ik');
+    const risoAccounts = accounts.filter(a => a.programme === 'riso');
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 w-full max-w-sm">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 w-full max-w-md">
           <h2 className="text-lg font-bold text-blue-800 mb-1">Вход в панель преподавателя</h2>
-          <p className="text-xs text-slate-500 mb-5">Введите логин и пароль для доступа</p>
+          <p className="text-xs text-slate-500 mb-5">
+            Научный руководитель ОП РиСО видит только работы своих студентов
+          </p>
           {loginError && (
             <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 mb-4 text-sm">
               {loginError}
             </div>
           )}
           <div className="mb-4">
-            <label className="block text-sm font-semibold mb-1.5">Логин</label>
-            <input type="text" value={loginInput} onChange={e => setLoginInput(e.target.value)}
-              placeholder="Введите логин"
-              className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+            <label className="block text-sm font-semibold mb-1.5">Выберите ваш аккаунт</label>
+            <select value={loginAccount} onChange={e => { setLoginAccount(e.target.value); setLoginError(''); }}
+              className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 bg-white">
+              <option value="">— Выберите —</option>
+              {risoAccounts.length > 0 && (
+                <optgroup label="ОП «Реклама и связи с общественностью»">
+                  {risoAccounts.map(a => <option key={a.id} value={a.login}>{a.fullName}</option>)}
+                </optgroup>
+              )}
+              {ikAccounts.length > 0 && (
+                <optgroup label="ОП «Интегрированные коммуникации»">
+                  {ikAccounts.map(a => <option key={a.id} value={a.login}>Общий доступ ОП ИК</option>)}
+                </optgroup>
+              )}
+            </select>
           </div>
           <div className="mb-5">
             <label className="block text-sm font-semibold mb-1.5">Пароль</label>
@@ -483,9 +580,9 @@ export default function TeacherPage() {
               placeholder="Введите пароль"
               className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
           </div>
-          <button onClick={handleLogin}
-            className="w-full px-5 py-2.5 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 transition">
-            Войти
+          <button onClick={handleLogin} disabled={loggingIn}
+            className="w-full px-5 py-2.5 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:bg-slate-300 transition">
+            {loggingIn ? 'Вход…' : 'Войти'}
           </button>
         </div>
       </div>
@@ -499,7 +596,10 @@ export default function TeacherPage() {
         <div className="max-w-5xl mx-auto px-6 py-5 flex justify-between items-center">
           <div>
             <h1 className="text-xl font-bold">Проверка ВКР</h1>
-            <p className="text-xs opacity-75 mt-0.5">Панель преподавателя</p>
+            <p className="text-xs opacity-75 mt-0.5">
+              Панель преподавателя · {teacher?.fullName}
+              {teacher && teacher.role !== 'shared' && ` · ${PROGRAMMES[teacher.programme === 'riso' ? 'riso' : 'ik'].shortLabel}`}
+            </p>
           </div>
           <nav className="flex gap-1 print:hidden">
             <Link href="/" className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition">
@@ -514,7 +614,7 @@ export default function TeacherPage() {
             </Link>
             <button onClick={handleLogout}
               className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition"
-              title="Выйти (удалить сохранённый вход)">
+              title="Выйти из учётной записи">
               Выйти
             </button>
           </nav>
@@ -535,7 +635,8 @@ export default function TeacherPage() {
           </div>
         )}
 
-        {/* Настройки */}
+        {/* Настройки дайджеста и итоговый отчёт — процессы ОП ИК */}
+        {isIk && (<>
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6 print:hidden">
           <h2 className="text-lg font-bold text-blue-800 mb-4">Настройка email-дайджеста</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -569,14 +670,17 @@ export default function TeacherPage() {
 
         {/* Итоговый отчёт */}
         <ReportSection message={message} setMessage={setMessage} />
+        </>)}
 
         {/* Статистика */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6 print:hidden">
-          <StatCard num={stats.total} label="Всего студентов" color="text-blue-600" />
+        <div className={`grid grid-cols-2 ${stats.notSubmitted === null ? 'md:grid-cols-4' : 'md:grid-cols-5'} gap-4 mb-6 print:hidden`}>
+          <StatCard num={stats.total} label={stats.notSubmitted === null ? 'Прислали работы' : 'Всего студентов'} color="text-blue-600" />
           <StatCard num={stats.passed} label="Зачёт" color="text-emerald-600" />
           <StatCard num={stats.failed} label="Незачёт" color="text-red-600" />
           <StatCard num={stats.pendingReview} label="Ожидает проверки" color="text-amber-600" />
-          <StatCard num={stats.notSubmitted} label="Не загрузили" color="text-slate-400" />
+          {stats.notSubmitted !== null && (
+            <StatCard num={stats.notSubmitted} label="Не загрузили" color="text-slate-400" />
+          )}
         </div>
 
         {/* Сводная таблица */}
@@ -740,7 +844,8 @@ export default function TeacherPage() {
           )}
         </div>
 
-        {/* ===== Курсовые работы студентов ===== */}
+        {/* ===== Курсовые работы студентов (модуль ОП ИК) ===== */}
+        {isIk && (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-7 mb-6 mt-6">
           <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
             <div>
@@ -859,6 +964,7 @@ export default function TeacherPage() {
             </span>
           </div>
         </div>
+        )}
       </main>
 
       {/* Модальное окно деталей проверки */}
@@ -1035,7 +1141,7 @@ function AttemptDetailModal({ attempt, onClose, onApprove, onReject }: { attempt
     const isTech = field === 'tech_comment';
     isTech ? setSavingTech(true) : setSavingReview(true);
     try {
-      const res = await fetch(`/api/attempts?id=${attempt.id}`, {
+      const res = await apiFetch(`/api/attempts?id=${attempt.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [field]: isTech ? techText : reviewText }),
@@ -1074,11 +1180,14 @@ function AttemptDetailModal({ attempt, onClose, onApprove, onReject }: { attempt
             <p className="text-xs text-slate-400 mt-1">
               {new Date(attempt.created_at).toLocaleString('ru-RU')}
               {attempt.file_name && <> &middot; {attempt.file_name}</>}
-              {attempt.file_path
+              {attempt.has_file
                 ? <> &middot; <a href={`/api/download?id=${attempt.id}`} className="text-blue-600 hover:text-blue-800 font-semibold underline" onClick={e => e.stopPropagation()}>Скачать работу</a></>
                 : <> &middot; <span className="text-amber-600 font-medium">Файл не сохранён</span></>
               }
             </p>
+            {attempt.supervisor_name && (
+              <p className="text-sm text-slate-600 mt-1">Научный руководитель: {attempt.supervisor_name}</p>
+            )}
             {attempt.work_title && (
               <p className="text-sm text-slate-600 mt-1">Тема: «{attempt.work_title}»</p>
             )}
@@ -1208,7 +1317,7 @@ function AttemptDetailModal({ attempt, onClose, onApprove, onReject }: { attempt
       </div>
 
       <div className="p-5 border-t border-slate-200 flex justify-end gap-3 items-center">
-        {attempt.file_path
+        {attempt.has_file
           ? <a href={`/api/download?id=${attempt.id}`}
               className="px-5 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 transition inline-flex items-center gap-1.5">
               Скачать работу
@@ -1227,15 +1336,13 @@ function AttemptDetailModal({ attempt, onClose, onApprove, onReject }: { attempt
 }
 
 // ============ СЕКЦИЯ «СОЗДАТЬ / ЗАКРЫТЬ ОТЧЁТ» ============
-const REPORT_PASSWORD = '1234';
-
 function ReportSection({ message, setMessage }: { message: string; setMessage: (m: string) => void }) {
   const [loading, setLoading] = useState(false);
   const [reportOpen, setReportOpen] = useState<boolean | null>(null); // null = загружается
   const [reportDate, setReportDate] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/report?student=__status__')
+    apiFetch('/api/report?student=__status__')
       .then(r => r.json())
       .then(json => {
         setReportOpen(!!json.reportReady);
@@ -1247,10 +1354,9 @@ function ReportSection({ message, setMessage }: { message: string; setMessage: (
   const handleCreate = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/report', {
+      const res = await apiFetch('/api/report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: REPORT_PASSWORD }),
       });
       const json = await res.json();
       if (res.ok) {
@@ -1272,10 +1378,9 @@ function ReportSection({ message, setMessage }: { message: string; setMessage: (
     if (!ok) return;
     setLoading(true);
     try {
-      const res = await fetch('/api/report', {
+      const res = await apiFetch('/api/report', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: REPORT_PASSWORD }),
       });
       if (res.ok) {
         setReportOpen(false);

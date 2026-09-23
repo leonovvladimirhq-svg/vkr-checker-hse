@@ -4,6 +4,7 @@
 
 import Database from 'better-sqlite3';
 import path from 'path';
+import { TEACHER_DIRECTORY, TeacherRole } from './teachers';
 
 const DB_PATH = path.join(process.cwd(), 'data', 'vkr.db');
 
@@ -43,7 +44,8 @@ function initSchema(db: Database.Database) {
       work_lang TEXT NOT NULL DEFAULT 'ru',
       volume_json TEXT,
       work_title TEXT,
-      db_stats_json TEXT
+      db_stats_json TEXT,
+      supervisor_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS settings (
@@ -194,6 +196,7 @@ function initSchema(db: Database.Database) {
         'volume_json TEXT',
         'work_title TEXT',
         'db_stats_json TEXT',
+        'supervisor_id TEXT',
       ];
       // Оставляем только те определения, для которых колонка реально есть,
       // и переносим ровно их — так лишняя/неизвестная колонка не уронит INSERT.
@@ -213,6 +216,34 @@ function initSchema(db: Database.Database) {
     try { db.exec('ROLLBACK'); } catch { /* транзакция уже закрыта */ }
     console.error('Migration work_type CHECK error (non-critical):', e);
   }
+
+  // 3) Научный руководитель (ОП РиСО): кому из преподавателей видна работа.
+  //    У записей ОП ИК и у всего, что сохранено до 23.09.2026, — NULL.
+  try {
+    const cols = db.prepare("PRAGMA table_info(attempts)").all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'supervisor_id')) {
+      db.exec("ALTER TABLE attempts ADD COLUMN supervisor_id TEXT");
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_attempts_supervisor ON attempts(programme, supervisor_id)');
+  } catch (e) {
+    console.error('Migration supervisor_id error (non-critical):', e);
+  }
+
+  // 4) Учётные записи преподавателей (см. src/lib/teachers.ts).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS teacher_accounts (
+      id TEXT PRIMARY KEY,
+      login TEXT NOT NULL UNIQUE,
+      full_name TEXT NOT NULL,
+      programme TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('supervisor', 'programme_lead', 'shared')),
+      password_hash TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  seedTeacherAccounts(db);
 
   // Default settings
   const insertSetting = db.prepare(
@@ -247,6 +278,7 @@ export interface AttemptRow {
   volume_json: string | null;
   work_title: string | null;
   db_stats_json: string | null;
+  supervisor_id: string | null;
   created_at: string;
 }
 
@@ -285,13 +317,14 @@ export function insertAttempt(data: {
   volume_json?: string;
   work_title?: string;
   db_stats_json?: string;
+  supervisor_id?: string;
 }): number {
   const db = getDb();
   const stmt = db.prepare(`
     INSERT INTO attempts (student_name, work_type, attempt_number, status, results_json,
       extracted_text_preview, file_name, db_link, pres_link, methods_json, uses_ai, wave, feedback, file_path,
-      programme, work_lang, volume_json, work_title, db_stats_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      programme, work_lang, volume_json, work_title, db_stats_json, supervisor_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
     data.student_name,
@@ -312,12 +345,13 @@ export function insertAttempt(data: {
     data.work_lang || 'ru',
     data.volume_json || null,
     data.work_title || null,
-    data.db_stats_json || null
+    data.db_stats_json || null,
+    data.supervisor_id || null
   );
   return result.lastInsertRowid as number;
 }
 
-export function getAllStudentsSummary(): Array<{
+export function getAllStudentsSummary(scope: AttemptScope | null): Array<{
   id: number;
   student_name: string;
   work_type: string;
@@ -326,25 +360,31 @@ export function getAllStudentsSummary(): Array<{
   last_date: string;
   wave: number;
   programme: string;
+  supervisor_id: string | null;
 }> {
   const db = getDb();
+  const { where, params } = scopeSql(scope);
+  // Ограничение по области видимости стоит И во внутреннем запросе: иначе
+  // «последняя попытка студента» бралась бы среди всех работ, и работа,
+  // сданная другому руководителю, вытесняла бы видимую.
   return db.prepare(`
-    SELECT id, student_name, work_type, status, attempt_number, created_at as last_date, wave, programme
+    SELECT id, student_name, work_type, status, attempt_number, created_at as last_date, wave, programme, supervisor_id
     FROM attempts
     WHERE id IN (
-      SELECT MAX(id) FROM attempts GROUP BY TRIM(student_name)
+      SELECT MAX(id) FROM attempts WHERE ${where} GROUP BY TRIM(student_name)
     )
     ORDER BY created_at DESC
-  `).all() as any[];
+  `).all(...params) as any[];
 }
 
-export function getTodayAttempts(): AttemptRow[] {
+export function getTodayAttempts(scope: AttemptScope | null): AttemptRow[] {
   const db = getDb();
+  const { where, params } = scopeSql(scope);
   return db.prepare(`
     SELECT * FROM attempts
-    WHERE DATE(created_at) = DATE('now')
+    WHERE DATE(created_at) = DATE('now') AND ${where}
     ORDER BY created_at DESC
-  `).all() as AttemptRow[];
+  `).all(...params) as AttemptRow[];
 }
 
 export function getAttemptById(id: number): AttemptRow | undefined {
@@ -383,11 +423,12 @@ export function getAttemptByIdIfInSnapshot(studentName: string, snapshotIds: num
   ).get(studentName, ...snapshotIds) as AttemptRow | undefined;
 }
 
-export function getAttemptsByStudent(studentName: string): AttemptRow[] {
+export function getAttemptsByStudent(studentName: string, scope: AttemptScope | null): AttemptRow[] {
   const db = getDb();
+  const { where, params } = scopeSql(scope);
   return db.prepare(
-    'SELECT * FROM attempts WHERE TRIM(student_name) = TRIM(?) ORDER BY created_at DESC'
-  ).all(studentName) as AttemptRow[];
+    `SELECT * FROM attempts WHERE TRIM(student_name) = TRIM(?) AND ${where} ORDER BY created_at DESC`
+  ).all(studentName, ...params) as AttemptRow[];
 }
 
 export function updateAttemptStatus(id: number, newStatus: string): boolean {
@@ -445,4 +486,87 @@ export function getSetting(key: string): string {
 export function setSetting(key: string, value: string): void {
   const db = getDb();
   db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, value);
+}
+
+// --- Область видимости работ ---
+
+/**
+ * Какие работы видит преподаватель. null — без ограничений: только для
+ * служебных вызовов сервера (снапшот отчёта), никогда — для ответа на запрос
+ * преподавателя.
+ */
+export interface AttemptScope {
+  programme: string;
+  /** Только работы этого научного руководителя; null — все работы программы. */
+  supervisorId: string | null;
+}
+
+function scopeSql(scope: AttemptScope | null): { where: string; params: string[] } {
+  if (!scope) return { where: '1=1', params: [] };
+  if (scope.supervisorId) {
+    return { where: 'programme = ? AND supervisor_id = ?', params: [scope.programme, scope.supervisorId] };
+  }
+  return { where: 'programme = ?', params: [scope.programme] };
+}
+
+/** Входит ли работа в область видимости — для запросов по id. */
+export function attemptInScope(attempt: Pick<AttemptRow, 'programme' | 'supervisor_id'>, scope: AttemptScope): boolean {
+  if ((attempt.programme || 'ik') !== scope.programme) return false;
+  if (scope.supervisorId && attempt.supervisor_id !== scope.supervisorId) return false;
+  return true;
+}
+
+// --- Учётные записи преподавателей ---
+
+export interface TeacherAccountRow {
+  id: string;
+  login: string;
+  full_name: string;
+  programme: string;
+  role: TeacherRole;
+  password_hash: string | null;
+  active: number;
+}
+
+/**
+ * Начальное наполнение из src/lib/teachers.ts. Новые записи добавляются,
+ * у существующих обновляются только ФИО и программа: роль, пароль и
+ * активность после первого добавления меняет скрипт teacher-account.mjs.
+ */
+function seedTeacherAccounts(db: Database.Database) {
+  const insert = db.prepare(`
+    INSERT INTO teacher_accounts (id, login, full_name, programme, role)
+    VALUES (@id, @login, @fullName, @programme, @initialRole)
+    ON CONFLICT(id) DO UPDATE SET
+      full_name = excluded.full_name,
+      programme = excluded.programme,
+      updated_at = CURRENT_TIMESTAMP
+  `);
+  const tx = db.transaction(() => {
+    for (const t of TEACHER_DIRECTORY) insert.run(t);
+  });
+  try {
+    tx();
+  } catch (e) {
+    console.error('Seed teacher_accounts error:', e);
+  }
+}
+
+export function getTeacherAccountById(id: string): TeacherAccountRow | undefined {
+  return getDb().prepare('SELECT * FROM teacher_accounts WHERE id = ?').get(id) as TeacherAccountRow | undefined;
+}
+
+export function getTeacherAccountByLogin(login: string): TeacherAccountRow | undefined {
+  return getDb().prepare('SELECT * FROM teacher_accounts WHERE login = ?').get(login.trim()) as TeacherAccountRow | undefined;
+}
+
+/** Активные учётные записи — для выпадающих списков (без хешей паролей). */
+export function listTeacherAccounts(): Array<Omit<TeacherAccountRow, 'password_hash'> & { has_password: number }> {
+  return getDb().prepare(`
+    SELECT id, login, full_name, programme, role, active,
+           CASE WHEN password_hash IS NULL OR password_hash = '' THEN 0 ELSE 1 END AS has_password
+    FROM teacher_accounts
+    WHERE active = 1
+    ORDER BY CASE role WHEN 'shared' THEN 0 ELSE 1 END, full_name
+  `).all() as any[];
 }

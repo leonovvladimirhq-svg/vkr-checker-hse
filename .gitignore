@@ -13,7 +13,9 @@ tsconfig.tsbuildinfo
 
 # Local-only utilities (load testing and one-off scripts)
 loadtest/
-scripts/
+scripts/*
+# ...кроме эксплуатационных: они едут в контейнер и запускаются на сервере
+!scripts/teacher-account.mjs
 
 # Server-side backups / local junk
 .env.bak.*

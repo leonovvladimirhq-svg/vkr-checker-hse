@@ -7,8 +7,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
 import { getCourseAttemptById } from '@/lib/db-course';
+import { requireIkShared } from '@/lib/teacher-auth';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
+  const { denied } = requireIkShared(req);
+  if (denied) return denied;
+
   try {
     const { searchParams } = new URL(req.url);
     const id = Number(searchParams.get('id'));

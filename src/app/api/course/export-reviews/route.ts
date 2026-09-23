@@ -4,7 +4,8 @@
 // Имя каждого файла — ФИО студента (чтобы учебному офису не путаться).
 // ============================================================
 
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { requireIkShared } from '@/lib/teacher-auth';
 import fs from 'fs/promises';
 import path from 'path';
 import JSZip from 'jszip';
@@ -20,7 +21,10 @@ function sanitizeName(name: string): string {
     .replace(/\s+/g, ' ') || 'Студент';
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const { denied } = requireIkShared(req);
+  if (denied) return denied;
+
   try {
     const rows = getCourseAttemptsWithTeacherReview();
     if (rows.length === 0) {
