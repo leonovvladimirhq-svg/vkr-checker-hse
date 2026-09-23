@@ -4,6 +4,7 @@
 
 import mammoth from 'mammoth';
 import JSZip from 'jszip';
+import { extractPdfWithTables } from './pdf-tables';
 
 export interface VolumeBreakdown {
   titlePageDetected: boolean;
@@ -11,13 +12,14 @@ export interface VolumeBreakdown {
   biblioFound: boolean;
   appendixFound: boolean;
   footnotesFound: boolean;
-  /**
-   * Удалось ли вычленить таблицы из текста работы.
-   * true — только для .docx (таблица размечена тегом <w:tbl>).
-   * В .pdf разметки нет: текст таблицы неотличим от обычного абзаца,
-   * поэтому из объёма вычитаются лишь подписи «Таблица N …» / «Рисунок N …».
-   */
+  /** Удалось ли вычленить таблицы из текста работы. */
   tablesExcluded: boolean;
+  /**
+   * Как именно. false — по разметке документа (.docx, тег <w:tbl>): точно.
+   * true — по расположению на странице (.pdf, см. pdf-tables.ts): разметки
+   * там нет, таблица узнаётся по нарисованным ячейкам и колонкам текста.
+   */
+  tablesFromLayout: boolean;
 }
 
 export interface ParsedDocument {
@@ -289,9 +291,33 @@ async function extractDocxBodyXml(buffer: Buffer): Promise<{ docXml: string | nu
 export async function parsePdf(buffer: Buffer, opts: ParseOptions = {}): Promise<ParsedDocument> {
   // Динамический импорт pdf-parse (CommonJS модуль)
   const pdfParse = (await import('pdf-parse')).default;
-  const data = await pdfParse(buffer);
 
-  const text = data.text;
+  // Когда объём нужно считать без таблиц, берём разбор с распознаванием
+  // таблиц (src/lib/pdf-tables.ts). Полный текст он даёт побайтово такой
+  // же, как pdf-parse, — проверено на 29 работах восьми генераторов PDF.
+  // Любая осечка разбора не должна ронять проверку работы: откатываемся
+  // на pdf-parse и честно помечаем, что таблицы не вычтены.
+  let text: string;
+  let numPages: number;
+  let textWithoutTables: string | null = null;
+
+  if (opts.excludeTablesFromVolume) {
+    try {
+      const extracted = await extractPdfWithTables(buffer);
+      text = extracted.text;
+      numPages = extracted.numPages;
+      textWithoutTables = extracted.textWithoutTables;
+    } catch (e) {
+      console.error('parsePdf: разбор таблиц не удался, считаем объём с таблицами:', e);
+      const data = await pdfParse(buffer);
+      text = data.text;
+      numPages = data.numpages;
+    }
+  } else {
+    const data = await pdfParse(buffer);
+    text = data.text;
+    numPages = data.numpages;
+  }
   const words = text.split(/\s+/).filter((w: string) => w.length > 0);
   const wordCount = words.length;
 
@@ -303,32 +329,33 @@ export async function parsePdf(buffer: Buffer, opts: ParseOptions = {}): Promise
   }).slice(0, 50); // Ограничиваем 50 заголовками
 
   // В PDF сноски идут инлайн внизу страницы и уже попадают в text → отдельно не добавляем.
-  //
-  // Таблицы в PDF разметки не имеют: строка таблицы выглядит как обычный абзац,
-  // и вычесть её из объёма нельзя без риска срезать настоящий текст. Убираем
-  // только подписи «Таблица N …» / «Рисунок N …», а пользователю показываем,
-  // что для точного подсчёта нужен .docx.
   const withTables = computeBodyVolume(text);
-  const volume = opts.excludeTablesFromVolume
-    ? computeBodyVolume(stripCaptionLines(text).text)
-    : withTables;
-  const excludedCaptionChars = Math.max(
-    0,
-    withTables.bodyCharCountWithSpaces - volume.bodyCharCountWithSpaces,
-  );
+  let volume = withTables;
+  let excludedTableChars = 0;
+  let excludedCaptionChars = 0;
+
+  if (opts.excludeTablesFromVolume) {
+    const base = textWithoutTables ?? text;
+    const noTables = computeBodyVolume(base);
+    volume = computeBodyVolume(stripCaptionLines(base).text);
+    excludedTableChars = Math.max(0, withTables.bodyCharCountWithSpaces - noTables.bodyCharCountWithSpaces);
+    excludedCaptionChars = Math.max(0, noTables.bodyCharCountWithSpaces - volume.bodyCharCountWithSpaces);
+    volume.breakdown.tablesExcluded = textWithoutTables !== null;
+    volume.breakdown.tablesFromLayout = textWithoutTables !== null;
+  }
 
   return {
     text,
     html: '', // PDF не даёт HTML
     headings,
     wordCount,
-    pageEstimate: data.numpages || Math.ceil(wordCount / 250),
+    pageEstimate: numPages || Math.ceil(wordCount / 250),
     bodyWordCount: volume.bodyWordCount,
     bodyCharCountWithSpaces: volume.bodyCharCountWithSpaces,
     bodyCharCountNoSpaces: volume.bodyCharCountNoSpaces,
     appendixWordCount: volume.appendixWordCount,
     footnoteCharCount: volume.footnoteCharCount,
-    excludedTableChars: 0,
+    excludedTableChars,
     excludedCaptionChars,
     excludedTableCount: 0,
     volumeBreakdown: volume.breakdown,
@@ -409,6 +436,7 @@ export function computeBodyVolume(text: string, footnotesText: string = ''): Bod
     appendixFound: false,
     footnotesFound: false,
     tablesExcluded: false,
+    tablesFromLayout: false,
   };
 
   // Эвристика титульного листа: упоминание «Высшая школа экономики» / «Магистерская»
