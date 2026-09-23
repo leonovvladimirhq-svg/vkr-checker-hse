@@ -37,7 +37,7 @@ export interface VolumeAssessment {
   excludedTableChars: number;
   /** Знаки подписей «Таблица N …» / «Рисунок N …», исключённые из объёма. */
   excludedCaptionChars: number;
-  /** Число таблиц в документе (.docx; для .pdf всегда 0). */
+  /** Число таблиц во ВСЁМ документе, включая приложения (.docx; для .pdf всегда 0). */
   excludedTableCount: number;
   /** Что удалось распознать в структуре документа — для прозрачности в отчёте. */
   breakdown: {
@@ -106,7 +106,10 @@ export function volumeNote(v: VolumeAssessment): string {
 export function excludedNote(v: VolumeAssessment): string {
   const excluded: string[] = [];
   if (v.excludedTableChars > 0) {
-    excluded.push(`таблицы из текста (${v.excludedTableCount} шт., ${nf(v.excludedTableChars)} знаков)`);
+    // Число таблиц намеренно не приводим: excludedTableCount считает таблицы
+    // во всём документе, а из объёма вычитаются только те, что попали в тело
+    // работы — таблица в приложении в объём и так не входила.
+    excluded.push(`таблицы из текста (${nf(v.excludedTableChars)} знаков)`);
   }
   if (v.excludedCaptionChars > 0) {
     excluded.push(`подписи к таблицам и иллюстрациям (${nf(v.excludedCaptionChars)} знаков)`);
