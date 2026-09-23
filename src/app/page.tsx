@@ -479,19 +479,43 @@ export default function StudentPage() {
               </div>
             )}
 
-            {needsSupervisor && supervisorName && (
-              <p className="text-sm text-slate-600 mt-4 text-right print:hidden">
-                {saved ? 'Работа отправлена' : 'Работа будет отправлена'} научному руководителю:{' '}
-                <span className="font-semibold text-slate-800">{supervisorName}</span>.
-                {!saved && ' Другие преподаватели её не увидят.'}
-              </p>
+            {/* Главное, что студент должен понять на этом экране: проверка ещё не
+                отправка. Без «Сохранить результат» работа до руководителя не дойдёт,
+                а студент может уйти со страницы, решив, что всё уже отправлено
+                (замечание заказчика, 23.09.2026). */}
+            {saved ? (
+              <div className="mt-5 flex items-start gap-3 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-lg px-4 py-3 text-sm print:hidden">
+                <span className="text-lg leading-5" aria-hidden>✓</span>
+                <div>
+                  <span className="font-semibold">Работа отправлена</span>
+                  {needsSupervisor && supervisorName
+                    ? <> научному руководителю: <span className="font-semibold">{supervisorName}</span>. Другие преподаватели её не увидят.</>
+                    : <> преподавателю.</>}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-5 flex items-start gap-3 bg-amber-50 border-2 border-amber-400 text-amber-900 rounded-lg px-4 py-3 text-sm print:hidden" role="alert">
+                <span className="text-lg leading-5" aria-hidden>⚠️</span>
+                <div>
+                  <p className="font-semibold">Работа ещё не отправлена.</p>
+                  <p className="mt-0.5">
+                    Чтобы отправить её
+                    {needsSupervisor && supervisorName
+                      ? <> научному руководителю (<span className="font-semibold">{supervisorName}</span>)</>
+                      : <> преподавателю</>}
+                    , обязательно нажмите кнопку{' '}
+                    <span className="font-semibold whitespace-nowrap">«Сохранить результат» ⬇</span>.
+                    Без сохранения результата работа не отправится.
+                  </p>
+                </div>
+              </div>
             )}
 
             {/* Кнопки */}
             <div className="flex gap-3 justify-end mt-6 print:hidden">
               <button onClick={handleSave} disabled={savingResult || saved}
-                className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition ${saved ? 'bg-emerald-100 text-emerald-700 border border-emerald-300 cursor-default' : 'bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-slate-300'}`}>
-                {saved ? '✓ Результат сохранён' : savingResult ? 'Сохранение...' : 'Сохранить результат'}
+                className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition ${saved ? 'bg-emerald-100 text-emerald-700 border border-emerald-300 cursor-default' : 'bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-slate-300 ring-4 ring-amber-300 ring-offset-1'}`}>
+                {saved ? '✓ Результат сохранён' : savingResult ? 'Сохранение...' : '💾 Сохранить результат'}
               </button>
               <button onClick={exportPDF} className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-slate-100 hover:bg-slate-200 border border-slate-200">
                 Скачать PDF
