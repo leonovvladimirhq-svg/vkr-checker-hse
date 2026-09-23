@@ -15,6 +15,7 @@ import { analyzeDbWithFallback, DbStats } from '@/lib/db-analyzer';
 import { PROGRAMMES } from '@/lib/programmes';
 import { programmeForWorkType } from '@/lib/programmes';
 import { RISO_MEDIA_MIN_MINUTES } from '@/lib/checklist';
+import { excludedNote } from '@/lib/volume';
 
 export const maxDuration = 120;
 
@@ -123,6 +124,11 @@ export async function GET(req: NextRequest) {
       charsNoSpaces: volume?.bodyCharsNoSpaces ?? null,
       footnoteChars: volume?.footnoteChars ?? null,
       volumeThreshold: volume?.threshold ?? null,
+      // У попыток, проверенных до 23.09.2026, в volume_json нет полей об
+      // исключённых таблицах — там строку не печатаем вовсе, чтобы не
+      // выдать «таблицы не вычитались» за факт задним числом.
+      volumeExcludedNote:
+        volume && typeof volume.excludedCaptionChars === 'number' ? excludedNote(volume) : null,
       volumeMet: typeof volume?.passed === 'boolean' ? volume.passed : null,
 
       usesAI: attempt.uses_ai === 1,

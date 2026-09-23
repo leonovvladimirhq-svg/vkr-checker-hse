@@ -16,7 +16,6 @@ import {
   WorkLang,
   ResearchMethod,
   RISO_VOLUME_THRESHOLDS,
-  RISO_CONCEPT_MIN_CHARS,
   RISO_MEDIA_MIN_MINUTES,
   IK_MEDIA_MIN_MINUTES,
 } from './checklist';
@@ -50,8 +49,6 @@ export interface ProgrammeConfig {
   hasLangChoice: boolean;
   /** Пороги объёма тела работы в знаках. null = объём не проверяется. */
   volumeThresholds: Record<WorkLang, number> | null;
-  /** Требование к объёму концептуальной части, знаков. null = не проверяется. */
-  conceptMinChars: number | null;
   /** Минимальная продолжительность аудио/видеозаписей, минут. */
   mediaMinMinutes: number;
   /** Спрашивать тему работы — она подставляется в шаблон отзыва руководителя. */
@@ -106,7 +103,6 @@ export const PROGRAMMES: Record<ProgrammeId, ProgrammeConfig> = {
     minMethods: (type) => (type === 'dissertation' ? 2 : 1),
     hasLangChoice: false,
     volumeThresholds: null,
-    conceptMinChars: null,
     mediaMinMinutes: IK_MEDIA_MIN_MINUTES,
     requiresWorkTitle: false,
     hasReviewTemplate: false,
@@ -127,7 +123,6 @@ export const PROGRAMMES: Record<ProgrammeId, ProgrammeConfig> = {
     minMethods: () => 1,
     hasLangChoice: true,
     volumeThresholds: RISO_VOLUME_THRESHOLDS,
-    conceptMinChars: RISO_CONCEPT_MIN_CHARS,
     mediaMinMinutes: RISO_MEDIA_MIN_MINUTES,
     requiresWorkTitle: true,
     hasReviewTemplate: true,

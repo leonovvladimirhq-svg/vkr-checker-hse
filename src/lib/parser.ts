@@ -11,7 +11,13 @@ export interface VolumeBreakdown {
   biblioFound: boolean;
   appendixFound: boolean;
   footnotesFound: boolean;
-  conceptFound: boolean;
+  /**
+   * Удалось ли вычленить таблицы из текста работы.
+   * true — только для .docx (таблица размечена тегом <w:tbl>).
+   * В .pdf разметки нет: текст таблицы неотличим от обычного абзаца,
+   * поэтому из объёма вычитаются лишь подписи «Таблица N …» / «Рисунок N …».
+   */
+  tablesExcluded: boolean;
 }
 
 export interface ParsedDocument {
@@ -28,10 +34,25 @@ export interface ParsedDocument {
   bodyCharCountNoSpaces: number;
   appendixWordCount: number;
   footnoteCharCount: number; // знаки сносок (с пробелами), уже включены в bodyCharCountWithSpaces
-  // Объём концептуальной (первой) главы, знаков с пробелами.
-  // null — границы главы не распознаны (проверка уходит в ручную).
-  conceptCharCount: number | null;
+  // Сколько знаков тела работы отброшено как таблицы и иллюстрации (п. 1.21).
+  excludedTableChars: number;   // содержимое таблиц
+  excludedCaptionChars: number; // подписи «Таблица N …», «Рисунок N …»
+  excludedTableCount: number;   // число таблиц во всём документе (.docx)
   volumeBreakdown: VolumeBreakdown;
+}
+
+export interface ParseOptions {
+  /**
+   * Исключать из объёма таблицы и подписи к иллюстрациям (п. 1.21 Программы
+   * практики ОП РиСО: «все таблицы, диаграммы и прочие иллюстративные
+   * материалы из текста работы выносятся в приложение и не входят в объем
+   * работы»).
+   *
+   * По умолчанию выключено: тот же пункт есть и в правилах для курсовых
+   * (пп. 2.1.25 и 2.2.33), но включать его там на середине учебного года —
+   * менять цифры уже проверенным работам, это отдельное решение заказчика.
+   */
+  excludeTablesFromVolume?: boolean;
 }
 
 /**
@@ -62,6 +83,105 @@ async function extractDocxNotesText(buffer: Buffer): Promise<string> {
   }
 }
 
+// ============================================================
+// Исключение таблиц и иллюстраций из объёма работы
+//
+// Программа практики ОП РиСО, п. 1.21: «все таблицы, диаграммы и прочие
+// иллюстративные материалы из текста работы выносятся в приложение и не
+// входят в объем работы». До 23.09.2026 чекер считал их наравне с текстом,
+// из-за чего объём работ с таблицами внутри глав был завышен.
+//
+// У иллюстраций в объём попадает только подпись (сама картинка знаков не
+// даёт), у таблиц — всё содержимое ячеек.
+// ============================================================
+
+/**
+ * Вырезает из XML документа сбалансированные блоки <w:tbl>…</w:tbl>.
+ *
+ * Таблицы бывают вложенными, поэтому нужен счётчик глубины, а не ленивый
+ * regex: `<w:tbl>[\s\S]*?</w:tbl>` на вложенной таблице закрылся бы на
+ * внутреннем теге и оставил хвост внешней в тексте.
+ *
+ * Открывающий тег ищем как `<w:tbl` + пробел или `>`: иначе под шаблон
+ * попадут <w:tblPr>, <w:tblGrid>, <w:tblW> — свойства, а не сама таблица.
+ */
+function stripDocxTables(xml: string): { xml: string; tableCount: number } {
+  const re = /<w:tbl(?=[\s>])|<\/w:tbl>/g;
+  let depth = 0;
+  let start = -1;
+  let last = 0;
+  let out = '';
+  let tableCount = 0;
+  let m: RegExpExecArray | null;
+
+  while ((m = re.exec(xml)) !== null) {
+    if (m[0] !== '</w:tbl>') {
+      if (depth === 0) start = m.index;
+      depth++;
+    } else if (depth > 0) {
+      depth--;
+      if (depth === 0) {
+        out += xml.slice(last, start);
+        last = m.index + m[0].length;
+        tableCount++;
+      }
+    }
+  }
+  out += xml.slice(last);
+  return { xml: out, tableCount };
+}
+
+/**
+ * Текст из XML документа Word.
+ *
+ * Абзац завершается ДВУМЯ переводами строки — ровно так же, как это делает
+ * mammoth.extractRawText. Совпадение важно: объём работы раньше считался по
+ * тексту mammoth, и расхождение в разделителе абзацев сдвинуло бы цифру у
+ * всех работ на 1–2 % без всякой связи с таблицами.
+ */
+function docxXmlToText(xml: string): string {
+  const tokenRe = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<\/w:p>|<w:tab\/>|<w:br\/>/g;
+  let out = '';
+  let m: RegExpExecArray | null;
+
+  while ((m = tokenRe.exec(xml)) !== null) {
+    if (m[0] === '</w:p>') out += '\n\n';
+    else if (m[0] === '<w:tab/>') out += '\t';
+    else if (m[0] === '<w:br/>') out += '\n';
+    else out += decodeXmlEntities(m[1]);
+  }
+  return out;
+}
+
+/**
+ * Подпись к таблице или иллюстрации: «Таблица 1 — Название», «Рисунок 2.
+ * Динамика», «Продолжение таблицы 3», «Figure 4. Sample».
+ *
+ * После номера обязателен разделитель или конец строки. Без этого условия
+ * под шаблон попала бы обычная фраза «Таблица 1 показывает, что…» — ссылка
+ * на таблицу в тексте, которая из объёма вычитаться не должна.
+ */
+const CAPTION_RE =
+  /^[ \t]*(?:продолжение\s+|окончание\s+)?(?:таблиц[аы]|табл\.|рисун(?:ок|ка)|рис\.|диаграмма|график|схема|table|figure|fig\.|chart|diagram)\s*№?\s*\d{1,3}(?:\.\d{1,2})?[ \t]*(?:[—–\-.:)][^\n]*)?$/i;
+
+/** Убирает строки-подписи; возвращает текст и сколько знаков отброшено. */
+function stripCaptionLines(text: string): { text: string; chars: number; count: number } {
+  const lines = text.split('\n');
+  const kept: string[] = [];
+  let chars = 0;
+  let count = 0;
+
+  for (const line of lines) {
+    if (CAPTION_RE.test(line)) {
+      chars += line.length;
+      count++;
+      continue;
+    }
+    kept.push(line);
+  }
+  return { text: kept.join('\n'), chars, count };
+}
+
 function decodeXmlEntities(s: string): string {
   return s
     .replace(/&amp;/g, '&')
@@ -77,8 +197,10 @@ function decodeXmlEntities(s: string): string {
  * Извлечение текста из .docx через mammoth.js
  * mammoth корректно обрабатывает кириллицу, форматирование, таблицы
  */
-export async function parseDocx(buffer: Buffer): Promise<ParsedDocument> {
-  // Извлечение текста
+export async function parseDocx(buffer: Buffer, opts: ParseOptions = {}): Promise<ParsedDocument> {
+  // Извлечение текста. Для GPT и проверки структуры нужен ПОЛНЫЙ текст,
+  // включая таблицы: их содержание проверяется по существу (кодировочные
+  // таблицы, выгрузки). Из объёма таблицы вычитаются отдельно, ниже.
   const textResult = await mammoth.extractRawText({ buffer });
   const text = textResult.value;
 
@@ -101,7 +223,33 @@ export async function parseDocx(buffer: Buffer): Promise<ParsedDocument> {
 
   // Текст сносок храним отдельно (mammoth его не извлекает) и добавляем к объёму тела.
   const footnotesText = await extractDocxNotesText(buffer);
-  const volume = computeBodyVolume(text, footnotesText);
+
+  // Объём считаем по тексту БЕЗ таблиц и подписей к иллюстрациям (п. 1.21).
+  // Опорный текст берём из XML, а не из mammoth: только так видно, какие
+  // абзацы лежат внутри <w:tbl>. Разделитель абзацев совпадает с mammoth,
+  // поэтому цифра «с таблицами» остаётся прежней.
+  const { docXml, tableCount } = opts.excludeTablesFromVolume
+    ? await extractDocxBodyXml(buffer)
+    : { docXml: null, tableCount: 0 };
+  let volume: BodyVolumeResult;
+  let excludedTableChars = 0;
+  let excludedCaptionChars = 0;
+
+  if (docXml) {
+    const noTablesText = docxXmlToText(stripDocxTables(docXml).xml);
+    const withTables = computeBodyVolume(docxXmlToText(docXml), footnotesText);
+    const noTables = computeBodyVolume(noTablesText, footnotesText);
+    volume = computeBodyVolume(stripCaptionLines(noTablesText).text, footnotesText);
+
+    excludedTableChars = Math.max(0, withTables.bodyCharCountWithSpaces - noTables.bodyCharCountWithSpaces);
+    excludedCaptionChars = Math.max(0, noTables.bodyCharCountWithSpaces - volume.bodyCharCountWithSpaces);
+    volume.breakdown.tablesExcluded = true;
+  } else {
+    // Таблицы не исключаем: либо так попросил вызывающий код, либо .docx
+    // нестандартный и word/document.xml в нём нет. Считаем как раньше,
+    // по тексту mammoth, и не утверждаем, что таблицы вычтены.
+    volume = computeBodyVolume(text, footnotesText);
+  }
 
   return {
     text,
@@ -114,15 +262,31 @@ export async function parseDocx(buffer: Buffer): Promise<ParsedDocument> {
     bodyCharCountNoSpaces: volume.bodyCharCountNoSpaces,
     appendixWordCount: volume.appendixWordCount,
     footnoteCharCount: volume.footnoteCharCount,
-    conceptCharCount: volume.conceptCharCount,
+    excludedTableChars,
+    excludedCaptionChars,
+    excludedTableCount: tableCount,
     volumeBreakdown: volume.breakdown,
   };
+}
+
+/** Достаёт word/document.xml и число таблиц в нём (или null, если файл нестандартный). */
+async function extractDocxBodyXml(buffer: Buffer): Promise<{ docXml: string | null; tableCount: number }> {
+  try {
+    const zip = await JSZip.loadAsync(buffer);
+    const file = zip.file('word/document.xml');
+    if (!file) return { docXml: null, tableCount: 0 };
+    const docXml = await file.async('string');
+    return { docXml, tableCount: stripDocxTables(docXml).tableCount };
+  } catch (e) {
+    console.error('extractDocxBodyXml failed (объём будет посчитан с таблицами):', e);
+    return { docXml: null, tableCount: 0 };
+  }
 }
 
 /**
  * Извлечение текста из .pdf через pdf-parse
  */
-export async function parsePdf(buffer: Buffer): Promise<ParsedDocument> {
+export async function parsePdf(buffer: Buffer, opts: ParseOptions = {}): Promise<ParsedDocument> {
   // Динамический импорт pdf-parse (CommonJS модуль)
   const pdfParse = (await import('pdf-parse')).default;
   const data = await pdfParse(buffer);
@@ -139,7 +303,19 @@ export async function parsePdf(buffer: Buffer): Promise<ParsedDocument> {
   }).slice(0, 50); // Ограничиваем 50 заголовками
 
   // В PDF сноски идут инлайн внизу страницы и уже попадают в text → отдельно не добавляем.
-  const volume = computeBodyVolume(text);
+  //
+  // Таблицы в PDF разметки не имеют: строка таблицы выглядит как обычный абзац,
+  // и вычесть её из объёма нельзя без риска срезать настоящий текст. Убираем
+  // только подписи «Таблица N …» / «Рисунок N …», а пользователю показываем,
+  // что для точного подсчёта нужен .docx.
+  const withTables = computeBodyVolume(text);
+  const volume = opts.excludeTablesFromVolume
+    ? computeBodyVolume(stripCaptionLines(text).text)
+    : withTables;
+  const excludedCaptionChars = Math.max(
+    0,
+    withTables.bodyCharCountWithSpaces - volume.bodyCharCountWithSpaces,
+  );
 
   return {
     text,
@@ -152,7 +328,9 @@ export async function parsePdf(buffer: Buffer): Promise<ParsedDocument> {
     bodyCharCountNoSpaces: volume.bodyCharCountNoSpaces,
     appendixWordCount: volume.appendixWordCount,
     footnoteCharCount: volume.footnoteCharCount,
-    conceptCharCount: volume.conceptCharCount,
+    excludedTableChars: 0,
+    excludedCaptionChars,
+    excludedTableCount: 0,
     volumeBreakdown: volume.breakdown,
   };
 }
@@ -160,13 +338,17 @@ export async function parsePdf(buffer: Buffer): Promise<ParsedDocument> {
 /**
  * Автоопределение формата и парсинг
  */
-export async function parseDocument(buffer: Buffer, filename: string): Promise<ParsedDocument> {
+export async function parseDocument(
+  buffer: Buffer,
+  filename: string,
+  opts: ParseOptions = {},
+): Promise<ParsedDocument> {
   const ext = filename.toLowerCase().split('.').pop();
 
   if (ext === 'docx') {
-    return parseDocx(buffer);
+    return parseDocx(buffer, opts);
   } else if (ext === 'pdf') {
-    return parsePdf(buffer);
+    return parsePdf(buffer, opts);
   } else {
     throw new Error(`Неподдерживаемый формат файла: .${ext}. Используйте .docx или .pdf`);
   }
@@ -208,7 +390,6 @@ interface BodyVolumeResult {
   bodyCharCountNoSpaces: number;
   appendixWordCount: number;
   footnoteCharCount: number;
-  conceptCharCount: number | null;
   breakdown: VolumeBreakdown;
 }
 
@@ -227,7 +408,7 @@ export function computeBodyVolume(text: string, footnotesText: string = ''): Bod
     biblioFound: false,
     appendixFound: false,
     footnotesFound: false,
-    conceptFound: false,
+    tablesExcluded: false,
   };
 
   // Эвристика титульного листа: упоминание «Высшая школа экономики» / «Магистерская»
@@ -296,62 +477,12 @@ export function computeBodyVolume(text: string, footnotesText: string = ''): Bod
     appendixWordCount = appendixText.split(/\s+/).filter(w => w.length > 0).length;
   }
 
-  // Объём концептуальной (первой) главы — от «Глава 1» до «Глава 2» внутри тела работы.
-  // Нужен для критерия 2 приложения 39 Программы практики ОП РиСО (>= 15 000 знаков).
-  const conceptCharCount = computeConceptCharCount(text, bodyStart, bodyEnd);
-  breakdown.conceptFound = conceptCharCount !== null;
-
   return {
     bodyWordCount,
     bodyCharCountWithSpaces,
     bodyCharCountNoSpaces,
     appendixWordCount,
     footnoteCharCount,
-    conceptCharCount,
     breakdown,
   };
-}
-
-/**
- * Объём концептуальной части в знаках с пробелами.
- *
- * Концептуальная часть — всё от первой главы до начала эмпирической.
- * Первая версия считала только «Глава 1 → Глава 2» и на реальной работе с тремя
- * концептуальными главами (Носова, 09.2026: главы 1–3 теория, глава 4 эмпирика)
- * давала 14 133 знака вместо ~55 000 — ложный «незачёт» по порогу 15 000.
- *
- * Правило: собираем заголовки всех глав внутри тела работы (оглавление выше
- * «Введения» не мешает), эмпирической считаем первую главу со словом
- * «эмпирическ» в названии; если такого слова нет — последнюю главу
- * (в академической ВКР эмпирика идёт последней). Концептуальная часть —
- * от первой главы до неё.
- *
- * Если глав меньше двух или нумерация нестандартная («Раздел 1», «1. Название»)
- * — возвращает null, и пункт уходит на ручную проверку. Лучше честный
- * «требуется проверка», чем неверная цифра в отзыве.
- */
-export function computeConceptCharCount(
-  text: string,
-  bodyStart: number,
-  bodyEnd: number,
-): number | null {
-  const body = text.substring(bodyStart, bodyEnd);
-
-  const headingRe = /(^|\n)[ \t]*(?:глава|chapter)[ \t]*(?:\d{1,2}|[ivx]{1,4})(?![0-9ivx])([^\n]{0,160})/gi;
-  const chapters: Array<{ index: number; title: string }> = [];
-  let m: RegExpExecArray | null;
-  while ((m = headingRe.exec(body)) !== null) {
-    chapters.push({ index: m.index + m[1].length, title: (m[2] || '').toLowerCase() });
-  }
-  if (chapters.length < 2) return null;
-
-  let empirical = chapters.findIndex((c, i) => i > 0 && /эмпирическ|empirical/.test(c.title));
-  if (empirical === -1) empirical = chapters.length - 1;
-
-  const conceptText = body.substring(chapters[0].index, chapters[empirical].index);
-  // Слишком короткий фрагмент — почти наверняка попадание в оглавление,
-  // а не в реальную главу. Не выдаём заведомо ложную цифру.
-  if (conceptText.replace(/\s+/g, '').length < 500) return null;
-
-  return conceptText.length;
 }

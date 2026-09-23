@@ -14,7 +14,7 @@ import { getChecklist, WorkType, WorkLang, ResearchMethod } from '@/lib/checklis
 import { getProgramme, isProgrammeId, isValidWorkType, DEFAULT_PROGRAMME } from '@/lib/programmes';
 import { getPublicResourceInfo } from '@/lib/yandex-disk';
 import { analyzeDatabase, DbAnalysisResult } from '@/lib/db-analyzer';
-import { assessVolume, VolumeAssessment } from '@/lib/volume';
+import { assessVolume, excludedNote, VolumeAssessment } from '@/lib/volume';
 import { track, userRef } from '@/lib/telemetry';
 
 export const maxDuration = 120; // Увеличенный таймаут для GPT-анализа
@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
 
     // --- Парсинг документа через mammoth/pdf-parse ---
     const fileBuffer = Buffer.from(await file.arrayBuffer());
-    const doc = await parseDocument(fileBuffer, file.name);
+    const doc = await parseDocument(fileBuffer, file.name, { excludeTablesFromVolume: true });
 
     // --- Анализ базы данных через Яндекс.Диск API ---
     let dbAnalysis: DbAnalysisResult | null = null;
@@ -247,9 +247,10 @@ function buildTechnicalSummary(
       footnoteChars: volume.footnoteChars,
       threshold: volume.threshold,
       requirementMet: volume.passed,
-      conceptChars: volume.conceptChars,
-      conceptThreshold: volume.conceptThreshold,
-      conceptRequirementMet: volume.conceptPassed,
+      excludedTableChars: volume.excludedTableChars,
+      excludedCaptionChars: volume.excludedCaptionChars,
+      excludedTableCount: volume.excludedTableCount,
+      excludedNote: excludedNote(volume),
       breakdown: volume.breakdown,
     },
     database: {

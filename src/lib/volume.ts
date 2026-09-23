@@ -9,14 +9,14 @@
 // Регламент — Программа практики ОП РиСО 2025/2026, п. 1.21:
 //   «Под объемом ВКР понимается количество знаков С ПРОБЕЛАМИ, с учетом
 //    сносок на источники и литературу… для работ на русском языке — не
-//    менее 100 000; на английском — не менее 90 000… в объем работы не
-//    входят: титульный лист, содержание, библиографический список и
-//    приложения.»
-// Приложение 39, критерий 2: концептуальная часть — не менее 15 тыс. знаков.
+//    менее 100 000; на английском — не менее 90 000… все таблицы, диаграммы
+//    и прочие иллюстративные материалы из текста работы выносятся в
+//    приложение и не входят в объем работы… в объем работы не входят:
+//    титульный лист, содержание, библиографический список и приложения.»
 // ============================================================
 
 import { ParsedDocument } from './parser';
-import { WorkLang, RISO_VOLUME_THRESHOLDS, RISO_CONCEPT_MIN_CHARS } from './checklist';
+import { WorkLang, RISO_VOLUME_THRESHOLDS } from './checklist';
 
 export interface VolumeAssessment {
   lang: WorkLang;
@@ -33,11 +33,12 @@ export interface VolumeAssessment {
   passed: boolean;
   /** Сколько знаков не хватает до порога (0, если порог взят). */
   shortfall: number;
-  /** Объём концептуальной главы, знаков с пробелами. null — границы не распознаны. */
-  conceptChars: number | null;
-  conceptThreshold: number;
-  /** null — требуется ручная проверка (границы главы не найдены). */
-  conceptPassed: boolean | null;
+  /** Знаки таблиц из текста работы, исключённые из объёма (п. 1.21). */
+  excludedTableChars: number;
+  /** Знаки подписей «Таблица N …» / «Рисунок N …», исключённые из объёма. */
+  excludedCaptionChars: number;
+  /** Число таблиц в документе (.docx; для .pdf всегда 0). */
+  excludedTableCount: number;
   /** Что удалось распознать в структуре документа — для прозрачности в отчёте. */
   breakdown: {
     titlePageDetected: boolean;
@@ -45,14 +46,13 @@ export interface VolumeAssessment {
     biblioFound: boolean;
     appendixFound: boolean;
     footnotesFound: boolean;
-    conceptFound: boolean;
+    tablesExcluded: boolean;
   };
 }
 
 export function assessVolume(doc: ParsedDocument, lang: WorkLang): VolumeAssessment {
   const threshold = RISO_VOLUME_THRESHOLDS[lang];
   const body = doc.bodyCharCountWithSpaces;
-  const concept = doc.conceptCharCount;
 
   return {
     lang,
@@ -64,9 +64,9 @@ export function assessVolume(doc: ParsedDocument, lang: WorkLang): VolumeAssessm
     appendixWordCount: doc.appendixWordCount,
     passed: body >= threshold,
     shortfall: Math.max(0, threshold - body),
-    conceptChars: concept,
-    conceptThreshold: RISO_CONCEPT_MIN_CHARS,
-    conceptPassed: concept === null ? null : concept >= RISO_CONCEPT_MIN_CHARS,
+    excludedTableChars: doc.excludedTableChars,
+    excludedCaptionChars: doc.excludedCaptionChars,
+    excludedTableCount: doc.excludedTableCount,
     breakdown: doc.volumeBreakdown,
   };
 }
@@ -84,6 +84,7 @@ export function volumeNote(v: VolumeAssessment): string {
   if (v.breakdown.footnotesFound) {
     parts.push(`В объём включены сноски (${nf(v.footnoteChars)} знаков).`);
   }
+  parts.push(excludedNote(v));
   if (!v.breakdown.introFound || !v.breakdown.biblioFound) {
     const missing: string[] = [];
     if (!v.breakdown.introFound) missing.push('«Введение»');
@@ -95,12 +96,27 @@ export function volumeNote(v: VolumeAssessment): string {
   return parts.join(' ');
 }
 
-/** Пояснение к пункту volume_concept чек-листа. */
-export function conceptVolumeNote(v: VolumeAssessment): string {
-  if (v.conceptChars === null) {
-    return `Не удалось определить границы концептуальной главы (заголовки «Глава 1» / «Глава 2» не найдены) — требуется ручная проверка объёма (требование: не менее ${nf(v.conceptThreshold)} знаков).`;
+/**
+ * Что исключено из объёма по п. 1.21 («все таблицы, диаграммы и прочие
+ * иллюстративные материалы из текста работы… не входят в объем работы»).
+ *
+ * Для .pdf оговариваем ограничение прямо: таблицы там не размечены, и
+ * вычесть их из объёма нельзя, не срезав заодно обычный текст.
+ */
+export function excludedNote(v: VolumeAssessment): string {
+  const excluded: string[] = [];
+  if (v.excludedTableChars > 0) {
+    excluded.push(`таблицы из текста (${v.excludedTableCount} шт., ${nf(v.excludedTableChars)} знаков)`);
   }
-  return v.conceptPassed
-    ? `${nf(v.conceptChars)} знаков при требовании не менее ${nf(v.conceptThreshold)}.`
-    : `${nf(v.conceptChars)} знаков при требовании не менее ${nf(v.conceptThreshold)} — не хватает ${nf(v.conceptThreshold - v.conceptChars)}.`;
+  if (v.excludedCaptionChars > 0) {
+    excluded.push(`подписи к таблицам и иллюстрациям (${nf(v.excludedCaptionChars)} знаков)`);
+  }
+
+  if (!v.breakdown.tablesExcluded) {
+    const head = excluded.length ? `Из объёма исключены ${excluded.join(' и ')}.` : '';
+    return `${head} Работа загружена в PDF: таблицы внутри текста в этом формате не размечены и из объёма не вычитаются — для точного подсчёта загрузите .docx.`.trim();
+  }
+  return excluded.length
+    ? `Из объёма исключены ${excluded.join(' и ')} — по п. 1.21 они выносятся в приложение.`
+    : 'Таблиц и иллюстраций в тексте работы не найдено — вычитать из объёма нечего.';
 }

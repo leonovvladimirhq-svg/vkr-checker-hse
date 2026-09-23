@@ -76,6 +76,8 @@ export interface RisoReviewData {
   footnoteChars: number | null;
   volumeThreshold: number | null;
   volumeMet: boolean | null;
+  /** Пояснение, что исключено из объёма по п. 1.21 (таблицы, подписи). */
+  volumeExcludedNote: string | null;
 
   usesAI: boolean;
 }
@@ -443,6 +445,12 @@ export async function buildRisoReviewDoc(d: RisoReviewData): Promise<Buffer> {
       `Объем работы без учета списка литературы и приложений ${nf(d.charsWithSpaces)} знаков с пробелами${footnotes}.`,
       { size: 24 },
     ));
+    // Отдельной строкой — что именно вычтено из объёма (п. 1.21: таблицы и
+    // иллюстрации из текста в объём не входят). Руководителю важно видеть,
+    // откуда цифра, особенно если работа пришла в PDF и таблицы вычесть нельзя.
+    if (d.volumeExcludedNote) {
+      children.push(p(d.volumeExcludedNote, { size: 20, italic: true }));
+    }
   } else {
     children.push(blankLine('Объем работы без учета списка литературы и приложений ______(число) знаков с пробелами.'));
   }

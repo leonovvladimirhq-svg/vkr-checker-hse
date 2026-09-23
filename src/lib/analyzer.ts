@@ -13,7 +13,7 @@ import { ProgrammeId, WorkType, WorkLang, CheckItem, CheckResult } from './check
 import { ParsedDocument, prepareTextForGPT } from './parser';
 import { DbAnalysisResult } from './db-analyzer';
 import { buildRisoSystemPrompt, buildRisoTextChecks } from './riso-prompt';
-import { VolumeAssessment, volumeNote, conceptVolumeNote } from './volume';
+import { VolumeAssessment, volumeNote } from './volume';
 
 interface GPTCheckResult {
   [checkId: string]: {
@@ -343,10 +343,6 @@ export function mergeResults(opts: MergeOptions): CheckResult[] {
     if (item.id === 'volume_total') {
       if (!volume) return { ...item, passed: null, note: 'Объём не рассчитан' };
       return { ...item, passed: volume.passed, note: volumeNote(volume) };
-    }
-    if (item.id === 'volume_concept') {
-      if (!volume) return { ...item, passed: null, note: 'Объём не рассчитан' };
-      return { ...item, passed: volume.conceptPassed, note: conceptVolumeNote(volume) };
     }
 
     // Продолжительность записей: точную длительность публичный API Яндекс.Диска

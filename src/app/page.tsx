@@ -22,9 +22,10 @@ interface TechnicalSummary {
     footnoteChars: number;
     threshold: number;
     requirementMet: boolean;
-    conceptChars: number | null;
-    conceptThreshold: number;
-    conceptRequirementMet: boolean | null;
+    excludedTableChars: number;
+    excludedCaptionChars: number;
+    excludedTableCount: number;
+    excludedNote: string;
   } | null;
   database: {
     accessible: boolean;
@@ -732,21 +733,10 @@ function TechnicalBlock({ technical }: { technical?: TechnicalSummary }) {
           </div>
           <p className="text-xs text-slate-500 mt-1">
             Считается тело работы со сносками ({nf(volume.footnoteChars)} знаков), без титульного листа,
-            содержания, списка литературы и приложений. Без пробелов: {nf(volume.charsNoSpaces)}.
+            содержания, списка литературы, приложений, а также таблиц и иллюстраций из текста.
+            Без пробелов: {nf(volume.charsNoSpaces)}.
           </p>
-          <div className="text-sm mt-1.5">
-            {volume.conceptChars === null ? (
-              <span className="text-amber-700">
-                ⊘ Концептуальная глава: границы не распознаны, объём проверяется вручную
-                (требование — не менее {nf(volume.conceptThreshold)} знаков)
-              </span>
-            ) : (
-              <span className={volume.conceptRequirementMet ? 'text-emerald-700' : 'text-red-700'}>
-                {volume.conceptRequirementMet ? '✓' : '✗'} Концептуальная глава: {nf(volume.conceptChars)} знаков
-                <span className="text-slate-500"> при требовании не менее {nf(volume.conceptThreshold)}</span>
-              </span>
-            )}
-          </div>
+          <p className="text-xs text-slate-500 mt-1">{volume.excludedNote}</p>
         </div>
       )}
 

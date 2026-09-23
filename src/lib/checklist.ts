@@ -57,9 +57,6 @@ export const RISO_VOLUME_THRESHOLDS: Record<WorkLang, number> = {
   en: 90000,
 };
 
-/** Приложение 39, критерий 2: концептуальная часть — не менее 15 тыс. знаков. */
-export const RISO_CONCEPT_MIN_CHARS = 15000;
-
 /** Приложение 35, п. 5: продолжительность аудио/видеозаписи — не менее 30 минут. */
 export const RISO_MEDIA_MIN_MINUTES = 30;
 
@@ -169,13 +166,7 @@ function getRisoChecklist({ empMethods, usesAI, otherMethodName, lang }: Checkli
     {
       id: 'volume_total',
       section: 'Объём работы',
-      text: `Объём работы не менее ${volumeThreshold.toLocaleString('ru-RU')} знаков с пробелами (со сносками; без титульного листа, содержания, списка литературы и приложений)`,
-      auto: true,
-    },
-    {
-      id: 'volume_concept',
-      section: 'Объём работы',
-      text: `Концептуальная часть не менее ${RISO_CONCEPT_MIN_CHARS.toLocaleString('ru-RU')} знаков (приложение 39, критерий 2)`,
+      text: `Объём работы не менее ${volumeThreshold.toLocaleString('ru-RU')} знаков с пробелами (со сносками; без титульного листа, содержания, списка литературы, приложений, а также таблиц и иллюстраций из текста)`,
       auto: true,
     },
   );
