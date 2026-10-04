@@ -1,0 +1,20 @@
+services:
+  vkr-checker:
+    build: .
+    image: vkr-checker:latest
+    container_name: vkr-checker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+    ports:
+      - "3000:3000"
+    volumes:
+      # SQLite БД + загрузки (uploads / course-uploads / course-reviews) переживают пересборку
+      - ./data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

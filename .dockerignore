@@ -1,0 +1,14 @@
+node_modules
+.next
+.git
+.gitignore
+data
+.env
+.env.*
+*.tar.gz
+_src.tar.gz
+ecosystem.config.js*
+README.md
+CLAUDE.md
+deploy
+npm-debug.log*
